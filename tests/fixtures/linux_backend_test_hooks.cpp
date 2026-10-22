@@ -1108,9 +1108,10 @@ namespace lvh::detail::test {
   std::vector<DeviceNode> linux_discover_nodes_by_name(
     const std::string &name,
     const std::string &input_root,
-    const std::string &hidraw_root
+    const std::string &hidraw_root,
+    std::string_view linux_phys
   ) {
-    return discover_input_nodes_by_name(name, input_root, hidraw_root);
+    return discover_input_nodes_by_name(name, input_root, hidraw_root, linux_phys);
   }
 
   std::size_t linux_empty_device_nodes_count() {

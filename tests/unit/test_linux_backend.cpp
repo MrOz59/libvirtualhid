@@ -240,6 +240,8 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
   std::filesystem::create_directories(input_root / "js0" / "device");
   std::filesystem::create_directories(input_root / "mouse0" / "device");
   std::filesystem::create_directories(input_root / "event1" / "device");
+  std::filesystem::create_directories(input_root / "event2" / "device");
+  std::filesystem::create_directories(input_root / "event3" / "device");
   std::filesystem::create_directories(hidraw_root / "hidraw0" / "device");
   std::filesystem::create_directories(hidraw_root / "hidraw1" / "device");
   std::filesystem::create_directories(hidraw_root / "hidraw2" / "device");
@@ -261,6 +263,22 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
   {
     std::ofstream file {input_root / "event1" / "device" / "name"};
     file << "other device\n";
+  }
+  // Different sessions may use identical input device names.
+  for (const auto &node : {"event0", "js0"}) {
+    std::ofstream file {input_root / node / "device" / "phys"};
+    file << "hermes-kms-1\n";
+  }
+  {
+    std::ofstream name {input_root / "event2" / "device" / "name"};
+    name << "libvirtualhid device\n";
+    std::ofstream phys {input_root / "event2" / "device" / "phys"};
+    phys << "hermes-kms-2\n";
+  }
+  {
+    std::ofstream name {input_root / "event3" / "device" / "name"};
+    name << "libvirtualhid device\n";
+    // Missing phys must not pass an explicit seat filter.
   }
   {
     std::ofstream file {hidraw_root / "hidraw0" / "device" / "uevent"};
@@ -309,6 +327,31 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
   EXPECT_TRUE(std::ranges::any_of(nodes, [sysfs_root](const auto &node) {
     return node.kind == lvh::DeviceNodeKind::sysfs && node.path.starts_with(sysfs_root.string());
   }));
+
+  const auto isolated_nodes = lvh::detail::test::linux_discover_nodes_by_name(
+    "libvirtualhid device",
+    input_root.string(),
+    hidraw_root.string(),
+    "hermes-kms-1"
+  );
+  EXPECT_TRUE(std::ranges::any_of(isolated_nodes, [](const auto &node) {
+    return node.kind == lvh::DeviceNodeKind::input_event && node.path == "/dev/input/event0";
+  }));
+  EXPECT_TRUE(std::ranges::any_of(isolated_nodes, [](const auto &node) {
+    return node.kind == lvh::DeviceNodeKind::joystick && node.path == "/dev/input/js0";
+  }));
+  EXPECT_FALSE(std::ranges::any_of(isolated_nodes, [](const auto &node) {
+    return node.path.ends_with("event2") || node.path.ends_with("event3") || node.path.ends_with("hidraw0");
+  }));
+  EXPECT_TRUE(
+    lvh::detail::test::linux_discover_nodes_by_name(
+      "libvirtualhid device",
+      input_root.string(),
+      hidraw_root.string(),
+      "hermes-kms-unknown"
+    )
+      .empty()
+  );
 
   const auto metadata_nodes = lvh::detail::test::linux_discover_hidraw_nodes_by_metadata(
     "missing hidraw name",
