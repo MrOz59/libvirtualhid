@@ -1436,6 +1436,67 @@ TEST_F(LinuxConsumerTest, LibinputSeesSplitUinputMouseMotionAndButtons) {
   EXPECT_EQ(libinput_event_pointer_get_button_state(pointer_event), LIBINPUT_BUTTON_STATE_RELEASED);
 }
 
+TEST_F(LinuxConsumerTest, UinputDevicesExposeCustomPhysicalPaths) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uinput"));
+
+  lvh::RuntimeOptions runtime_options;
+  runtime_options.backend = lvh::BackendKind::platform_default;
+  auto runtime = lvh::Runtime::create(runtime_options);
+  ASSERT_TRUE(runtime->capabilities().supports_keyboard);
+  ASSERT_TRUE(runtime->capabilities().supports_mouse);
+  ASSERT_TRUE(runtime->capabilities().supports_touchscreen);
+  ASSERT_TRUE(runtime->capabilities().supports_trackpad);
+  ASSERT_TRUE(runtime->capabilities().supports_pen_tablet);
+
+  const auto expect_physical_path = [](const std::string &device_name, const std::string &expected) {
+    const auto event_node = wait_for_readable_event_node(device_name);
+    ASSERT_TRUE(event_node) << "missing uinput node: " << device_name;
+    const auto sysfs_phys = std::filesystem::path {"/sys/class/input"} / event_node->filename() / "device" / "phys";
+    EXPECT_EQ(read_first_line(sysfs_phys), std::optional<std::string> {expected});
+  };
+
+  lvh::CreateKeyboardOptions keyboard_options;
+  keyboard_options.profile = lvh::profiles::keyboard();
+  keyboard_options.profile.name = unique_device_name("Hermes keyboard phys");
+  keyboard_options.profile.linux_phys = "hermes-kms-1";
+  auto keyboard = runtime->create_keyboard(keyboard_options);
+  ASSERT_TRUE(keyboard) << keyboard.status.message();
+  expect_physical_path(keyboard_options.profile.name, "hermes-kms-1");
+
+  lvh::CreateMouseOptions mouse_options;
+  mouse_options.profile = lvh::profiles::mouse();
+  mouse_options.profile.name = unique_device_name("Hermes mouse phys");
+  mouse_options.profile.linux_phys = "hermes-kms-2";
+  auto mouse = runtime->create_mouse(mouse_options);
+  ASSERT_TRUE(mouse) << mouse.status.message();
+  expect_physical_path(mouse_options.profile.name, "hermes-kms-2");
+  expect_physical_path(mouse_options.profile.name + " (Absolute)", "hermes-kms-2");
+
+  lvh::CreateTouchscreenOptions touch_options;
+  touch_options.profile = lvh::profiles::touchscreen();
+  touch_options.profile.name = unique_device_name("Hermes touch phys");
+  touch_options.profile.linux_phys = "hermes-kms-3";
+  auto touch = runtime->create_touchscreen(touch_options);
+  ASSERT_TRUE(touch) << touch.status.message();
+  expect_physical_path(touch_options.profile.name, "hermes-kms-3");
+
+  lvh::CreateTrackpadOptions trackpad_options;
+  trackpad_options.profile = lvh::profiles::trackpad();
+  trackpad_options.profile.name = unique_device_name("Hermes trackpad phys");
+  trackpad_options.profile.linux_phys = "hermes-kms-4";
+  auto trackpad = runtime->create_trackpad(trackpad_options);
+  ASSERT_TRUE(trackpad) << trackpad.status.message();
+  expect_physical_path(trackpad_options.profile.name, "hermes-kms-4");
+
+  lvh::CreatePenTabletOptions pen_options;
+  pen_options.profile = lvh::profiles::pen_tablet();
+  pen_options.profile.name = unique_device_name("Hermes pen phys");
+  pen_options.profile.linux_phys = "hermes-kms-5";
+  auto pen = runtime->create_pen_tablet(pen_options);
+  ASSERT_TRUE(pen) << pen.status.message();
+  expect_physical_path(pen_options.profile.name, "hermes-kms-5");
+}
+
 TEST_F(LinuxConsumerTest, LibinputSeesUinputTouchscreenContacts) {
   ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uinput"));
 
