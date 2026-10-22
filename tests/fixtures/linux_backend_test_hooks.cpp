@@ -1247,6 +1247,37 @@ namespace lvh::detail::test {
     return {std::move(status), std::move(records)};
   }
 
+  LinuxInputSubmissionResult linux_uinput_gamepad_delta_pipe(GamepadProfileKind kind) {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    UinputGamepad gamepad {descriptors[1], kind};
+    GamepadState neutral;
+    GamepadState pressed;
+    pressed.buttons.set(GamepadButton::a);
+    pressed.left_stick.x = 0.5F;
+    auto status = gamepad.submit(neutral, {});
+    if (status.ok()) {
+      status = gamepad.submit(neutral, {});
+    }
+    if (status.ok()) {
+      status = gamepad.submit(pressed, {});
+    }
+    if (status.ok()) {
+      status = gamepad.submit(pressed, {});
+    }
+    if (status.ok()) {
+      status = gamepad.submit(neutral, {});
+    }
+
+    static_cast<void>(gamepad.close());
+    auto records = read_input_events_until_eof(descriptors[0]);
+    static_cast<void>(::close(descriptors[0]));
+    return {std::move(status), std::move(records)};
+  }
+
   LinuxUinputRumbleResult linux_uinput_gamepad_fake_rumble(
     GamepadProfileKind kind,
     std::uint16_t effect_type,
