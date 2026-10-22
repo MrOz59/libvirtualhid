@@ -456,6 +456,11 @@ TEST(RuntimeTest, RejectsNonFinitePointerInputBeforeSubmission) {
   contact.contact_major_axis = 0.0F;
   contact.contact_minor_axis = nan;
   check_touch_invalid(contact);
+  contact.contact_minor_axis = -1.0F;
+  check_touch_invalid(contact);
+  contact.contact_minor_axis = 0.0F;
+  contact.contact_major_axis = -1.0F;
+  check_touch_invalid(contact);
   EXPECT_EQ(touch.touchscreen->submit_count(), 0U);
   EXPECT_EQ(trackpad.trackpad->submit_count(), 0U);
 
