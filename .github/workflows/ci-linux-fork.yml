@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - 'ci/**'
   pull_request:
   workflow_dispatch:
 
@@ -67,6 +68,22 @@ jobs:
             sudo apt-get install -y --no-install-recommends "${extra_modules}"
           fi
 
+      - name: Configure Debug build with tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B cmake-build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_EXAMPLES=ON \
+            -DBUILD_TESTS=ON \
+            -DLIBVIRTUALHID_BUILD_TOOLS=OFF \
+            -DLIBVIRTUALHID_WARNINGS_AS_ERRORS=ON
+
+      - name: Compile library, examples, and tests
+        shell: bash
+        run: cmake --build cmake-build-ci --parallel 2
+
       - name: Enable kernel virtual input devices and udev permissions
         shell: bash
         run: |
@@ -93,22 +110,6 @@ jobs:
           if ! sudo modprobe hid_playstation; then
             echo "::warning::hid_playstation unavailable; HIDAPI-dependent behavior may differ."
           fi
-
-      - name: Configure Debug build with tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake -S . -B cmake-build-ci -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DBUILD_DOCS=OFF \
-            -DBUILD_EXAMPLES=ON \
-            -DBUILD_TESTS=ON \
-            -DLIBVIRTUALHID_BUILD_TOOLS=OFF \
-            -DLIBVIRTUALHID_WARNINGS_AS_ERRORS=ON
-
-      - name: Compile library, examples, and tests
-        shell: bash
-        run: cmake --build cmake-build-ci --parallel 2
 
       - name: Run complete GoogleTest suite (including uinput/UHID tests)
         shell: bash
