@@ -1037,7 +1037,11 @@ namespace lvh {
     float y = 0.0F;
 
     /**
-     * @brief Normalized pressure in the inclusive range `[0.0, 1.0]`, or negative to leave pressure unchanged.
+     * @brief Normalized pressure in the inclusive range `[0.0, 1.0]`, or negative when not reporting pressure.
+     *
+     * For an update transition, nonnegative pressure denotes tip contact even
+     * when the measured pressure is zero. Use negative pressure and nonnegative
+     * distance for hover; release/cancel/leave explicitly end tip contact.
      */
     float pressure = -1.0F;
 
