@@ -1311,6 +1311,18 @@ TEST_F(LinuxBackendTest, FakeLinuxBackendCreatesAllDeviceTypes) {
   EXPECT_TRUE(result.pen_tablet_close_status.ok()) << result.pen_tablet_close_status.message();
 }
 
+TEST_F(LinuxBackendTest, ExplicitLinuxPhysicalIdentityNeverFallsBackToXTest) {
+  const auto keyboard_open = lvh::detail::test::linux_backend_keyboard_isolated_fake_failure(true);
+  EXPECT_EQ(keyboard_open.code(), lvh::ErrorCode::backend_unavailable);
+  const auto keyboard_create = lvh::detail::test::linux_backend_keyboard_isolated_fake_failure(false);
+  EXPECT_EQ(keyboard_create.code(), lvh::ErrorCode::backend_failure);
+
+  const auto mouse_open = lvh::detail::test::linux_backend_mouse_isolated_fake_failure(true);
+  EXPECT_EQ(mouse_open.code(), lvh::ErrorCode::backend_unavailable);
+  const auto mouse_create = lvh::detail::test::linux_backend_mouse_isolated_fake_failure(false);
+  EXPECT_EQ(mouse_create.code(), lvh::ErrorCode::backend_failure);
+}
+
 TEST_F(LinuxBackendTest, OpensUhidGamepadsNonblocking) {
   const auto flags = lvh::detail::test::linux_backend_gamepad_open_flags();
   EXPECT_EQ(flags & O_ACCMODE, O_RDWR);
