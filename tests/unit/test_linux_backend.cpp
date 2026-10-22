@@ -1003,7 +1003,6 @@ TEST_F(LinuxBackendTest, TouchAndPenMapIntoTargetViewportWithDesktopBounds) {
   expect_position(legacy.events, 0);
 }
 
-
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
   auto result = lvh::detail::test::linux_uinput_trackpad_multi_contact_pipe();
   ASSERT_TRUE(result.status.ok()) << result.status.message();
