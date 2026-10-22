@@ -3599,7 +3599,7 @@ namespace lvh::detail {
         }
         // UHID messages are complete fixed-size records, not a byte stream.
         // Never dispatch a truncated record padded by the zeroed event buffer.
-        return result_read == sizeof(event) ? ReadEventResult::event : ReadEventResult::stop;
+        return static_cast<std::size_t>(result_read) == sizeof(event) ? ReadEventResult::event : ReadEventResult::stop;
       }
 
       void read_loop(std::stop_token stop_token) {
