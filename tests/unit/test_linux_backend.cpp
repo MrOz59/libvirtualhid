@@ -6,6 +6,7 @@
 // standard includes
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -147,7 +148,7 @@ TEST_F(LinuxBackendTest, TranslatesMouseButtonsAndBusTypes) {
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::brush), BTN_TOOL_BRUSH);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::pencil), BTN_TOOL_PENCIL);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::airbrush), BTN_TOOL_AIRBRUSH);
-  EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::touch), BTN_TOUCH);
+  EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::touch), BTN_TOOL_FINGER);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::unchanged), -1);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(static_cast<lvh::PenToolType>(255)), -1);
   EXPECT_EQ(lvh::detail::test::linux_pen_button(lvh::PenButton::primary), BTN_STYLUS);
@@ -893,8 +894,9 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   EXPECT_EQ(result.events[2].value, 1);
   EXPECT_EQ(result.events[3].type, EV_ABS);
   EXPECT_EQ(result.events[3].code, ABS_X);
-  EXPECT_EQ(result.events[4].type, EV_ABS);
-  EXPECT_EQ(result.events[4].code, ABS_MT_POSITION_X);
+  EXPECT_TRUE(std::ranges::any_of(result.events, [](const auto &event) {
+    return event.type == EV_ABS && event.code == ABS_MT_POSITION_X;
+  }));
 
   result = lvh::detail::test::linux_uinput_trackpad_contact_pipe(contact);
   ASSERT_TRUE(result.status.ok()) << result.status.message();
@@ -932,6 +934,40 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   EXPECT_TRUE(saw_stylus);
 }
 
+TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
+  for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
+    const auto result = lvh::detail::test::linux_uinput_touch_primary_pointer_pipe(kind);
+    ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+    std::vector<int> primary_x;
+    std::vector<int> primary_pressure;
+    std::vector<int> slot_x;
+    for (const auto &event : result.events) {
+      if (event.type != EV_ABS) {
+        continue;
+      }
+      if (event.code == ABS_X) {
+        primary_x.push_back(event.value);
+      } else if (event.code == ABS_PRESSURE) {
+        primary_pressure.push_back(event.value);
+      } else if (event.code == ABS_MT_POSITION_X) {
+        slot_x.push_back(event.value);
+      }
+    }
+    const auto x = [](float fraction) {
+      return static_cast<int>(std::lround(fraction * 19200.0F));
+    };
+    const auto pressure = [](float fraction) {
+      return static_cast<int>(std::lround(fraction * 253.0F));
+    };
+    // Secondary updates change the MT slot, not the legacy primary axes.
+    // Removing the primary promotes the last known secondary position.
+    EXPECT_EQ(primary_x, (std::vector<int> {x(0.2F), x(0.9F), x(0.7F)}));
+    EXPECT_EQ(primary_pressure, (std::vector<int> {pressure(0.2F), pressure(0.9F), pressure(0.7F)}));
+    EXPECT_EQ(slot_x, (std::vector<int> {x(0.2F), x(0.8F), x(0.9F), x(0.7F)}));
+  }
+}
+
 TEST_F(LinuxBackendTest, TouchAndPenMapIntoTargetViewportWithDesktopBounds) {
   const lvh::PointerViewport desktop {.offset_x = -1920, .offset_y = 0, .width = 3840, .height = 1080};
   const lvh::PointerViewport right_display {.offset_x = 0, .offset_y = 0, .width = 1920, .height = 1080};
@@ -966,6 +1002,7 @@ TEST_F(LinuxBackendTest, TouchAndPenMapIntoTargetViewportWithDesktopBounds) {
   ASSERT_TRUE(legacy.status.ok()) << legacy.status.message();
   expect_position(legacy.events, 0);
 }
+
 
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
   auto result = lvh::detail::test::linux_uinput_trackpad_multi_contact_pipe();
@@ -1060,6 +1097,29 @@ TEST_F(LinuxBackendTest, PenCancelAndLeaveEndProximityUntilNextUpdate) {
   }
   EXPECT_EQ(touch_states, (std::vector<int> {1, 0, 0, 0, 1}));
   EXPECT_EQ(proximity_states, (std::vector<int> {1, 0, 1, 0, 1}));
+}
+
+TEST_F(LinuxBackendTest, FingerToolDoesNotImplyTipContact) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::touch, .distance = 0.5F},
+    {.tool = lvh::PenToolType::touch, .pressure = 0.6F},
+    {.tool = lvh::PenToolType::unchanged, .transition = lvh::PointerTransition::release},
+    {.tool = lvh::PenToolType::unchanged, .transition = lvh::PointerTransition::leave},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::vector<int> tools;
+  std::vector<int> contacts;
+  for (const auto &event : result.events) {
+    if (event.type == EV_KEY && event.code == BTN_TOOL_FINGER) {
+      tools.push_back(event.value);
+    }
+    if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+      contacts.push_back(event.value);
+    }
+  }
+  EXPECT_EQ(tools, (std::vector<int> {1, 0}));
+  EXPECT_EQ(contacts, (std::vector<int> {0, 1, 0, 0}));
 }
 
 TEST_F(LinuxBackendTest, PenPressureTakesPrecedenceOverDistanceWhenBothArePresent) {
@@ -1612,6 +1672,7 @@ TEST_F(LinuxBackendTest, FakeUinputConstructionCoversCapabilitiesAndFailureBranc
   EXPECT_TRUE(has_property(pen_tablet, INPUT_PROP_POINTER));
   EXPECT_TRUE(has_property(pen_tablet, INPUT_PROP_DIRECT));
   EXPECT_NE(find_code(pen_tablet, EV_KEY, BTN_TOOL_PEN), nullptr);
+  EXPECT_NE(find_code(pen_tablet, EV_KEY, BTN_TOOL_FINGER), nullptr);
   const auto *pen_x = find_code(pen_tablet, EV_ABS, ABS_X);
   ASSERT_NE(pen_x, nullptr);
   EXPECT_TRUE(pen_x->has_absinfo);

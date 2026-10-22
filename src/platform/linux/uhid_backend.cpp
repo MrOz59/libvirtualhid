@@ -1367,7 +1367,17 @@ namespace lvh::detail {
         return status;
       }
 
-      std::vector buttons {BTN_TOUCH, BTN_STYLUS, BTN_STYLUS2, BTN_TOOL_PEN, BTN_TOOL_RUBBER, BTN_TOOL_BRUSH, BTN_TOOL_PENCIL, BTN_TOOL_AIRBRUSH};
+      std::vector buttons {
+        BTN_TOUCH,
+        BTN_STYLUS,
+        BTN_STYLUS2,
+        BTN_TOOL_PEN,
+        BTN_TOOL_RUBBER,
+        BTN_TOOL_BRUSH,
+        BTN_TOOL_PENCIL,
+        BTN_TOOL_AIRBRUSH,
+        BTN_TOOL_FINGER,
+      };
 #if defined(BTN_STYLUS3)
       buttons.push_back(BTN_STYLUS3);
 #endif
@@ -2040,19 +2050,20 @@ namespace lvh::detail {
         const auto x = scale_pointer_axis_to_desktop(contact.x, touch_axis_max_x, contact.viewport, desktop_, true);
         const auto y = scale_pointer_axis_to_desktop(contact.y, touch_axis_max_y, contact.viewport, desktop_, false);
         const auto pressure = scale_normalized_axis(contact.pressure, touch_pressure_max);
-        if (const auto status = emit_event(EV_ABS, ABS_X, x); !status.ok()) {
-          return status;
+
+        // ABS_X/Y/PRESSURE are the legacy single-pointer axes, not the MT
+        // slot axes. Keep them bound to one active contact instead of letting
+        // every finger move the primary pointer.
+        const auto is_primary = !primary_contact_id_.has_value() || *primary_contact_id_ == contact.id;
+        if (is_primary) {
+          if (const auto status = emit_primary_axes(contact); !status.ok()) {
+            return status;
+          }
         }
         if (const auto status = emit_event(EV_ABS, ABS_MT_POSITION_X, x); !status.ok()) {
           return status;
         }
-        if (const auto status = emit_event(EV_ABS, ABS_Y, y); !status.ok()) {
-          return status;
-        }
         if (const auto status = emit_event(EV_ABS, ABS_MT_POSITION_Y, y); !status.ok()) {
-          return status;
-        }
-        if (const auto status = emit_event(EV_ABS, ABS_PRESSURE, pressure); !status.ok()) {
           return status;
         }
         if (const auto status = emit_event(EV_ABS, ABS_MT_PRESSURE, pressure); !status.ok()) {
@@ -2061,7 +2072,14 @@ namespace lvh::detail {
         if (const auto status = emit_event(EV_ABS, ABS_MT_ORIENTATION, clamp_degrees(contact.orientation)); !status.ok()) {
           return status;
         }
-        return sync();
+        if (const auto status = sync(); !status.ok()) {
+          return status;
+        }
+        latest_contacts_[contact.id] = contact;
+        if (is_primary) {
+          primary_contact_id_ = contact.id;
+        }
+        return OperationStatus::success();
       }
 
       OperationStatus release_touch_contact(std::int32_t contact_id, bool update_trackpad_buttons) {
@@ -2076,9 +2094,26 @@ namespace lvh::detail {
         if (const auto status = select_slot(slot_it->second); !status.ok()) {
           return status;
         }
+        const auto was_primary = primary_contact_id_ == contact_id;
         contacts_.erase(slot_it);
+        latest_contacts_.erase(contact_id);
         if (const auto status = emit_event(EV_ABS, ABS_MT_TRACKING_ID, -1); !status.ok()) {
           return status;
+        }
+
+        // Promote a surviving touch and restore its saved position and
+        // pressure so single-pointer consumers do not jump to stale axes.
+        auto next_primary = std::optional<std::int32_t> {};
+        if (was_primary && !contacts_.empty()) {
+          const auto oldest_slot = std::min_element(contacts_.begin(), contacts_.end(), [](const auto &a, const auto &b) {
+            return a.second < b.second;
+          });
+          next_primary = oldest_slot->first;
+          if (const auto last = latest_contacts_.find(*next_primary); last != latest_contacts_.end()) {
+            if (const auto status = emit_primary_axes(last->second); !status.ok()) {
+              return status;
+            }
+          }
         }
 
         if (update_trackpad_buttons) {
@@ -2091,7 +2126,13 @@ namespace lvh::detail {
           }
         }
 
-        return sync();
+        if (const auto status = sync(); !status.ok()) {
+          return status;
+        }
+        if (was_primary) {
+          primary_contact_id_ = next_primary;
+        }
+        return OperationStatus::success();
       }
 
       OperationStatus emit_touch_button(bool pressed) {
@@ -2105,6 +2146,18 @@ namespace lvh::detail {
       }
 
     private:
+      OperationStatus emit_primary_axes(const TouchContact &contact) {
+        const auto x = scale_pointer_axis_to_desktop(contact.x, touch_axis_max_x, contact.viewport, desktop_, true);
+        const auto y = scale_pointer_axis_to_desktop(contact.y, touch_axis_max_y, contact.viewport, desktop_, false);
+        if (const auto status = emit_event(EV_ABS, ABS_X, x); !status.ok()) {
+          return status;
+        }
+        if (const auto status = emit_event(EV_ABS, ABS_Y, y); !status.ok()) {
+          return status;
+        }
+        return emit_event(EV_ABS, ABS_PRESSURE, scale_normalized_axis(contact.pressure, touch_pressure_max));
+      }
+
       std::optional<int> slot_for_contact(std::int32_t contact_id) {
         if (const auto it = contacts_.find(contact_id); it != contacts_.end()) {
           new_slot_ = false;
@@ -2156,6 +2209,8 @@ namespace lvh::detail {
       std::string device_name_;
       PointerViewport desktop_;
       std::map<std::int32_t, int> contacts_;
+      std::map<std::int32_t, TouchContact> latest_contacts_;
+      std::optional<std::int32_t> primary_contact_id_;
       int current_slot_ = -1;
       std::uint32_t next_tracking_id_ = 0;
       bool new_slot_ = false;
@@ -2247,7 +2302,9 @@ namespace lvh::detail {
         case airbrush:
           return BTN_TOOL_AIRBRUSH;
         case touch:
-          return BTN_TOUCH;
+          // BTN_TOOL_FINGER identifies the selected tool; BTN_TOUCH indicates
+          // contact and is independently emitted by pressure/hover transitions.
+          return BTN_TOOL_FINGER;
         case unchanged:
           return -1;
       }
