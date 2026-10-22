@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - master
-      - 'ci/**'
   pull_request:
   workflow_dispatch:
 
@@ -97,6 +96,18 @@ jobs:
           EOF
           sudo udevadm control --reload-rules
 
+          # The USB PlayStation tests exercise SDL2 HIDAPI against virtual
+          # UHID devices, not the host kernel's hid_playstation driver.
+          # Explicitly loading that driver made USB device discovery fail on
+          # some Azure runners while the same tests passed without it.
+          # Keep this path deterministic; kernel-driver binding is a separate
+          # integration scenario requiring its own tests.
+          echo 'blacklist hid_playstation' |
+            sudo tee /etc/modprobe.d/99-libvirtualhid-hidapi-ci.conf >/dev/null
+          if lsmod | grep -q '^hid_playstation '; then
+            sudo modprobe -r hid_playstation
+          fi
+
           for module in uinput uhid; do
             if ! sudo modprobe "${module}"; then
               echo "::warning::Could not load ${module}; checking existing device node."
@@ -107,8 +118,12 @@ jobs:
             fi
             sudo chmod a+rw "/dev/${module}"
           done
-          if ! sudo modprobe hid_playstation; then
-            echo "::warning::hid_playstation unavailable; HIDAPI-dependent behavior may differ."
+          echo "Kernel PlayStation driver status:"
+          if lsmod | grep '^hid_playstation '; then
+            echo "::error::hid_playstation remained loaded in the SDL HIDAPI test runner."
+            exit 1
+          else
+            echo "hid_playstation not loaded (SDL HIDAPI path)."
           fi
 
       - name: Run complete GoogleTest suite (including uinput/UHID tests)
