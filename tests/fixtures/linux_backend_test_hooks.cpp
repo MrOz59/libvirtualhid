@@ -1035,6 +1035,40 @@ namespace lvh::detail::test {
       return {std::move(status), std::move(records)};
     }
 
+    template<typename TouchDevice>
+    LinuxInputSubmissionResult touch_hover_sequence_pipe() {
+      std::array<int, 2> descriptors {-1, -1};
+      if (::pipe(descriptors.data()) != 0) {
+        return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+      }
+      TouchDevice device {descriptors[1]};
+
+      auto status = device.place_contact({.id = 5, .x = 0.1F, .pressure = 0.9F, .touching = false});
+      if (status.ok()) {
+        status = device.place_contact({.id = 5, .x = 0.2F, .pressure = 0.5F});
+      }
+      if (status.ok()) {
+        status = device.place_contact({.id = 1, .x = 0.3F, .pressure = 0.8F, .touching = false});
+      }
+      if (status.ok()) {
+        status = device.place_contact({.id = 1, .x = 0.4F, .pressure = 0.7F});
+      }
+      if (status.ok()) {
+        status = device.place_contact({.id = 5, .x = 0.5F, .pressure = 0.9F, .touching = false});
+      }
+      if (status.ok()) {
+        status = device.release_contact(1, PointerTransition::release);
+      }
+      if (status.ok()) {
+        status = device.release_contact(5, PointerTransition::leave);
+      }
+
+      static_cast<void>(device.close());
+      auto events = read_input_events_until_eof(descriptors[0]);
+      static_cast<void>(::close(descriptors[0]));
+      return {std::move(status), std::move(events)};
+    }
+
   }  // namespace
 
   std::string linux_copy_string_char_buffer(const std::string &source) {
@@ -1740,6 +1774,17 @@ namespace lvh::detail::test {
         return touch_primary_pointer_pipe<UinputTouchscreen>();
       case DeviceType::trackpad:
         return touch_primary_pointer_pipe<UinputTrackpad>();
+      default:
+        return {OperationStatus::failure(ErrorCode::invalid_argument, "unsupported touch device type"), {}};
+    }
+  }
+
+  LinuxInputSubmissionResult linux_uinput_touch_hover_sequence_pipe(DeviceType device_type) {
+    switch (device_type) {
+      case DeviceType::touchscreen:
+        return touch_hover_sequence_pipe<UinputTouchscreen>();
+      case DeviceType::trackpad:
+        return touch_hover_sequence_pipe<UinputTrackpad>();
       default:
         return {OperationStatus::failure(ErrorCode::invalid_argument, "unsupported touch device type"), {}};
     }
