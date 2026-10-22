@@ -8,6 +8,7 @@
 
 // standard includes
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -418,6 +419,83 @@ TEST(RuntimeTest, CreatesSubmitsAndClosesPenTablet) {
   EXPECT_EQ(created.pen_tablet->last_submitted_tool().tool, lvh::PenToolType::pen);
   EXPECT_TRUE(created.pen_tablet->close().ok());
   EXPECT_EQ(created.pen_tablet->button(lvh::PenButton::primary, false).code(), lvh::ErrorCode::device_closed);
+}
+
+TEST(RuntimeTest, RejectsNonFinitePointerInputBeforeSubmission) {
+  auto runtime = lvh::Runtime::create();
+  const auto nan = std::numeric_limits<float>::quiet_NaN();
+  const auto infinity = std::numeric_limits<float>::infinity();
+
+  auto mouse = runtime->create_mouse();
+  ASSERT_TRUE(mouse);
+  EXPECT_EQ(mouse.mouse->move_absolute(nan, 0.5F, 1, 1).code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(mouse.mouse->move_absolute(0.5F, infinity, 1, 1).code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(mouse.mouse->submit_count(), 0U);
+  EXPECT_TRUE(mouse.mouse->move_absolute(0.5F, 0.5F, 1, 1).ok());
+
+  auto touch = runtime->create_touchscreen();
+  auto trackpad = runtime->create_trackpad();
+  ASSERT_TRUE(touch);
+  ASSERT_TRUE(trackpad);
+  lvh::TouchContact contact {.id = 1, .x = 0.25F, .y = 0.5F, .pressure = 0.5F};
+  const auto check_touch_invalid = [&](const lvh::TouchContact &invalid) {
+    EXPECT_EQ(touch.touchscreen->place_contact(invalid).code(), lvh::ErrorCode::invalid_argument);
+    EXPECT_EQ(trackpad.trackpad->place_contact(invalid).code(), lvh::ErrorCode::invalid_argument);
+  };
+  contact.x = nan;
+  check_touch_invalid(contact);
+  contact.x = 0.25F;
+  contact.y = infinity;
+  check_touch_invalid(contact);
+  contact.y = 0.5F;
+  contact.pressure = nan;
+  check_touch_invalid(contact);
+  contact.pressure = 0.5F;
+  contact.contact_major_axis = infinity;
+  check_touch_invalid(contact);
+  contact.contact_major_axis = 0.0F;
+  contact.contact_minor_axis = nan;
+  check_touch_invalid(contact);
+  EXPECT_EQ(touch.touchscreen->submit_count(), 0U);
+  EXPECT_EQ(trackpad.trackpad->submit_count(), 0U);
+
+  contact.contact_minor_axis = 0.0F;
+  EXPECT_TRUE(touch.touchscreen->place_contact(contact).ok());
+  EXPECT_TRUE(trackpad.trackpad->place_contact(contact).ok());
+
+  auto pen = runtime->create_pen_tablet();
+  ASSERT_TRUE(pen);
+  lvh::PenToolState state {.x = 0.5F, .y = 0.5F, .pressure = 0.5F};
+  const auto check_pen_invalid = [&](const lvh::PenToolState &invalid) {
+    EXPECT_EQ(pen.pen_tablet->place_tool(invalid).code(), lvh::ErrorCode::invalid_argument);
+  };
+  state.x = nan;
+  check_pen_invalid(state);
+  state.x = 0.5F;
+  state.y = infinity;
+  check_pen_invalid(state);
+  state.y = 0.5F;
+  state.pressure = nan;
+  check_pen_invalid(state);
+  state.pressure = 0.5F;
+  state.distance = infinity;
+  check_pen_invalid(state);
+  state.distance = -1.0F;
+  state.tilt_x = nan;
+  check_pen_invalid(state);
+  state.tilt_x = 0.0F;
+  state.tilt_y = infinity;
+  check_pen_invalid(state);
+  EXPECT_EQ(pen.pen_tablet->submit_count(), 0U);
+
+  // Release/cancel/leave packets may contain undefined analog fields.
+  state.transition = lvh::PointerTransition::release;
+  EXPECT_TRUE(pen.pen_tablet->place_tool(state).ok());
+  state.transition = lvh::PointerTransition::cancel;
+  EXPECT_TRUE(pen.pen_tablet->place_tool(state).ok());
+  state.transition = lvh::PointerTransition::leave;
+  EXPECT_TRUE(pen.pen_tablet->place_tool(state).ok());
+  EXPECT_EQ(pen.pen_tablet->submit_count(), 3U);
 }
 
 TEST_F(LinuxRuntimeTest, LinuxUhidSmokeTestRequiresPrerequisites) {
