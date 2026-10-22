@@ -1346,6 +1346,44 @@ namespace lvh::detail::test {
     return observation;
   }
 
+  std::pair<OperationStatus, OperationStatus> linux_uinput_touch_release_write_failure(DeviceType device_type) {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.override_ioctl = true;
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    const auto run = [&](auto &device) {
+      const auto initial = device.place_contact({.id = 7, .x = 0.5F, .y = 0.5F, .pressure = 0.5F});
+      if (!initial.ok()) {
+        return std::pair {initial, initial};
+      }
+      // Fail after slot selection, during release's tracking-id event.
+      syscalls.fail_write_call = syscalls.write_call_count.load() + 1;
+      const auto first = device.release_contact(7, PointerTransition::release);
+      const auto second = device.release_contact(7, PointerTransition::release);
+      static_cast<void>(device.close());
+      return std::pair {first, second};
+    };
+
+    switch (device_type) {
+      case DeviceType::touchscreen:
+        {
+          UinputTouchscreen touchscreen {fake_fd};
+          return run(touchscreen);
+        }
+      case DeviceType::trackpad:
+        {
+          UinputTrackpad trackpad {fake_fd};
+          return run(trackpad);
+        }
+      default:
+        {
+          const auto error = OperationStatus::failure(ErrorCode::invalid_argument, "unsupported touch device type");
+          return {error, error};
+        }
+    }
+  }
+
   std::pair<OperationStatus, int> linux_uinput_interrupted_write_retry() {
     LinuxTestSyscalls syscalls;
     syscalls.override_write = true;
