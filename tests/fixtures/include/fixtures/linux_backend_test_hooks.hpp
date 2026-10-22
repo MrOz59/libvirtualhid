@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // local includes
@@ -50,6 +51,16 @@ namespace lvh::detail::test {
      * @brief Events emitted by the backend.
      */
     std::vector<LinuxInputEventRecord> events;
+  };
+
+  /**
+   * @brief Observe whether a failed uinput frame can be submitted again.
+   */
+  struct LinuxUinputWriteFailureObservation {
+    OperationStatus first_submit;
+    OperationStatus second_submit;
+    int calls_after_first = 0;
+    int calls_after_second = 0;
   };
 
   /**
@@ -874,6 +885,22 @@ namespace lvh::detail::test {
    * @return Submission status and captured input events.
    */
   LinuxInputSubmissionResult linux_uinput_keyboard_submit_pipe(const KeyboardEvent &event);
+
+  /**
+   * @brief Inject a failed or short second write in an input event frame.
+   *
+   * @param device_type Keyboard, touchscreen, pen tablet or gamepad.
+   * @param short_write Whether to return a short count instead of EIO.
+   * @return Original and subsequent errors and syscall write counts.
+   */
+  LinuxUinputWriteFailureObservation linux_uinput_write_failure_sequence(DeviceType device_type, bool short_write);
+
+  /**
+   * @brief Test retrying an interrupted uinput write without poisoning the device.
+   *
+   * @return Submission result and number of kernel writes attempted.
+   */
+  std::pair<OperationStatus, int> linux_uinput_interrupted_write_retry();
 
   /**
    * @brief Submit normalized state through a pipe-backed uinput gamepad.

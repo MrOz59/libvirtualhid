@@ -123,6 +123,7 @@ namespace lvh::detail::test {
       bool override_write = false;
       std::atomic_int write_call_count = 0;
       int fail_write_call = -1;
+      int interrupt_write_call = -1;
       int short_write_call = -1;
       std::size_t short_write_size = 1;
       bool capture_input_events = false;
@@ -231,6 +232,10 @@ std::ptrdiff_t lvh_linux_test_write(int fd, const std::byte *buffer, std::size_t
     const auto call_count = ++lvh::detail::test::active_test_syscalls()->write_call_count;
     if (lvh::detail::test::active_test_syscalls()->fail_write_call == call_count) {
       errno = EIO;
+      return -1;
+    }
+    if (lvh::detail::test::active_test_syscalls()->interrupt_write_call == call_count) {
+      errno = EINTR;
       return -1;
     }
     if (lvh::detail::test::active_test_syscalls()->short_write_call == call_count) {
@@ -1245,6 +1250,80 @@ namespace lvh::detail::test {
     auto records = read_input_events_until_eof(descriptors[0]);
     static_cast<void>(::close(descriptors[0]));
     return {std::move(status), std::move(records)};
+  }
+
+  LinuxUinputWriteFailureObservation linux_uinput_write_failure_sequence(DeviceType device_type, bool short_write) {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.override_ioctl = true;
+    if (short_write) {
+      syscalls.short_write_call = 2;
+    } else {
+      syscalls.fail_write_call = 2;
+    }
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+    LinuxUinputWriteFailureObservation observation;
+
+    const auto record_submissions = [&](auto &device, const auto &submit) {
+      observation.first_submit = submit(device);
+      observation.calls_after_first = syscalls.write_call_count.load();
+      observation.second_submit = submit(device);
+      observation.calls_after_second = syscalls.write_call_count.load();
+      static_cast<void>(device.close());
+    };
+
+    switch (device_type) {
+      case DeviceType::keyboard:
+        {
+          UinputKeyboard keyboard {fake_fd};
+          record_submissions(keyboard, [](auto &device) {
+            return device.submit({.key_code = 0x41, .pressed = true});
+          });
+          break;
+        }
+      case DeviceType::touchscreen:
+        {
+          UinputTouchscreen touchscreen {fake_fd};
+          record_submissions(touchscreen, [](auto &device) {
+            return device.place_contact({.id = 1, .x = 0.5F, .y = 0.5F, .pressure = 0.5F});
+          });
+          break;
+        }
+      case DeviceType::pen_tablet:
+        {
+          UinputPenTablet pen {fake_fd};
+          record_submissions(pen, [](auto &device) {
+            return device.place_tool({.tool = PenToolType::pen, .x = 0.5F, .pressure = 0.5F});
+          });
+          break;
+        }
+      case DeviceType::gamepad:
+        {
+          UinputGamepad gamepad {fake_fd, GamepadProfileKind::xbox_360};
+          record_submissions(gamepad, [](auto &device) {
+            return device.submit({}, {});
+          });
+          break;
+        }
+      default:
+        observation.first_submit = OperationStatus::failure(ErrorCode::invalid_argument, "unsupported device kind");
+        break;
+    }
+    return observation;
+  }
+
+  std::pair<OperationStatus, int> linux_uinput_interrupted_write_retry() {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.override_ioctl = true;
+    syscalls.interrupt_write_call = 1;
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    UinputKeyboard keyboard {fake_fd};
+    const auto status = keyboard.submit({.key_code = 0x41, .pressed = true});
+    const auto calls = syscalls.write_call_count.load();
+    static_cast<void>(keyboard.close());
+    return {status, calls};
   }
 
   LinuxInputSubmissionResult linux_uinput_gamepad_delta_pipe(GamepadProfileKind kind) {
