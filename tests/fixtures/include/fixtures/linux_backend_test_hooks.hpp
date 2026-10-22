@@ -1035,6 +1035,14 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_pen_tablet_transition_pipe();
 
   /**
+   * @brief Submit a sequence of pen states to a pipe-backed uinput tablet.
+   *
+   * @param states Ordered pen tool states and transitions.
+   * @return Submission status and captured Linux input events.
+   */
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_sequence_pipe(const std::vector<PenToolState> &states);
+
+  /**
    * @brief Submit pen tablet events after close.
    *
    * @return Final closed-device status.
