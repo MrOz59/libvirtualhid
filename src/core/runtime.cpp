@@ -385,8 +385,16 @@ namespace lvh {
     }
 
     OperationStatus validate_mouse_event(const MouseEvent &event) {
-      if (event.kind == MouseEventKind::absolute_motion && (event.width <= 0 || event.height <= 0)) {
-        return OperationStatus::failure(ErrorCode::invalid_argument, "absolute mouse movement requires positive dimensions");
+      if (event.kind == MouseEventKind::absolute_motion) {
+        if (event.width <= 0 || event.height <= 0) {
+          return OperationStatus::failure(ErrorCode::invalid_argument, "absolute mouse movement requires positive dimensions");
+        }
+        if (
+          event.has_fractional_absolute_coordinates &&
+          (!std::isfinite(event.absolute_x) || !std::isfinite(event.absolute_y))
+        ) {
+          return OperationStatus::failure(ErrorCode::invalid_argument, "absolute mouse coordinates must be finite");
+        }
       }
 
       return OperationStatus::success();
@@ -396,7 +404,27 @@ namespace lvh {
       if (contact.id < 0) {
         return OperationStatus::failure(ErrorCode::invalid_argument, "touch contact id must not be negative");
       }
+      if (
+        !std::isfinite(contact.x) || !std::isfinite(contact.y) || !std::isfinite(contact.pressure) ||
+        !std::isfinite(contact.contact_major_axis) || !std::isfinite(contact.contact_minor_axis)
+      ) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "touch contact values must be finite");
+      }
 
+      return OperationStatus::success();
+    }
+
+    OperationStatus validate_pen_tool_state(const PenToolState &state) {
+      // Terminal transitions do not require coordinates or analog state.
+      if (state.transition != PointerTransition::update) {
+        return OperationStatus::success();
+      }
+      if (
+        !std::isfinite(state.x) || !std::isfinite(state.y) || !std::isfinite(state.pressure) ||
+        !std::isfinite(state.distance) || !std::isfinite(state.tilt_x) || !std::isfinite(state.tilt_y)
+      ) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "pen tool values must be finite");
+      }
       return OperationStatus::success();
     }
 
@@ -1136,6 +1164,9 @@ namespace lvh {
   }
 
   OperationStatus PenTablet::place_tool(const PenToolState &state) {
+    if (const auto validation = validate_pen_tool_state(state); !validation.ok()) {
+      return validation;
+    }
     return with_device(device_, [&state](auto &device) {
       if (!device.open) {
         return OperationStatus::failure(ErrorCode::device_closed, "pen tablet is closed");
