@@ -1070,8 +1070,53 @@ TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
     // Secondary updates change the MT slot, not the legacy primary axes.
     // Removing the primary promotes the last known secondary position.
     EXPECT_EQ(primary_x, (std::vector<int> {x(0.2F), x(0.9F), x(0.7F)}));
-    EXPECT_EQ(primary_pressure, (std::vector<int> {pressure(0.2F), pressure(0.9F), pressure(0.7F)}));
+    EXPECT_EQ(primary_pressure, (std::vector<int> {pressure(0.2F), pressure(0.9F), pressure(0.7F), 0}));
     EXPECT_EQ(slot_x, (std::vector<int> {x(0.2F), x(0.8F), x(0.9F), x(0.7F)}));
+  }
+}
+
+TEST_F(LinuxBackendTest, TouchHoverNeverSynthesizesSurfaceContact) {
+  for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
+    const auto result = lvh::detail::test::linux_uinput_touch_hover_sequence_pipe(kind);
+    ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+    std::vector<int> touch_states;
+    std::vector<int> distances;
+    std::vector<int> mt_pressures;
+    std::vector<int> tracking_ids;
+    std::vector<int> legacy_pressures;
+    std::vector<int> single_finger;
+    std::vector<int> double_finger;
+    for (const auto &event : result.events) {
+      if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+        touch_states.push_back(event.value);
+      } else if (event.type == EV_ABS && event.code == ABS_MT_DISTANCE) {
+        distances.push_back(event.value);
+      } else if (event.type == EV_ABS && event.code == ABS_MT_PRESSURE) {
+        mt_pressures.push_back(event.value);
+      } else if (event.type == EV_ABS && event.code == ABS_MT_TRACKING_ID) {
+        tracking_ids.push_back(event.value);
+      } else if (event.type == EV_ABS && event.code == ABS_PRESSURE) {
+        legacy_pressures.push_back(event.value);
+      } else if (event.type == EV_KEY && event.code == BTN_TOOL_FINGER) {
+        single_finger.push_back(event.value);
+      } else if (event.type == EV_KEY && event.code == BTN_TOOL_DOUBLETAP) {
+        double_finger.push_back(event.value);
+      }
+    }
+
+    EXPECT_EQ(touch_states, (std::vector<int> {0, 1, 1, 1, 1, 0, 0}));
+    EXPECT_EQ(distances, (std::vector<int> {1, 0, 1, 0, 1}));
+    EXPECT_EQ(tracking_ids, (std::vector<int> {0, 1, -1, -1}));
+    EXPECT_EQ(mt_pressures.front(), 0) << "hover cannot apply stale pressure";
+    EXPECT_EQ(mt_pressures[2], 0) << "second hovering finger cannot press";
+    ASSERT_GE(legacy_pressures.size(), 3U);
+    EXPECT_EQ(legacy_pressures.back(), 0) << "removing the last contact clears pressure";
+
+    if (kind == lvh::DeviceType::trackpad) {
+      EXPECT_EQ(single_finger, (std::vector<int> {0, 1, 1, 0, 1, 0, 0}));
+      EXPECT_EQ(double_finger, (std::vector<int> {0, 0, 0, 1, 0, 0, 0}));
+    }
   }
 }
 
