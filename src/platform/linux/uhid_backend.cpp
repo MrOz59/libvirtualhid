@@ -1351,6 +1351,11 @@ namespace lvh::detail {
       if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_PRESSURE, "touch absolute axis", &mt_pressure); !status.ok()) {
         return status;
       }
+      // 0 means surface contact; a positive value indicates hover.
+      auto mt_distance = make_absinfo(0, 1);
+      if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_DISTANCE, "touch proximity axis", &mt_distance); !status.ok()) {
+        return status;
+      }
       auto orientation = make_absinfo(-90, 90);
       if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_ORIENTATION, "touch absolute axis", &orientation); !status.ok()) {
         return status;
@@ -2067,41 +2072,64 @@ namespace lvh::detail {
             return status;
           }
           new_slot_ = false;
-          if (update_trackpad_buttons) {
-            if (const auto status = emit_trackpad_tool_buttons(); !status.ok()) {
+        }
+
+        // The slot tracks proximity, but only contacts touching the surface
+        // contribute to BTN_TOUCH and the legacy single-pointer axes.
+        const auto touching_after = touching_count(contact.id, contact.touching);
+        auto next_primary = primary_contact_id_;
+        if (primary_contact_id_ == contact.id && !contact.touching) {
+          next_primary = oldest_touching_contact(contact.id);
+        } else if (!primary_contact_id_.has_value() && contact.touching) {
+          next_primary = contact.id;
+        }
+
+        if (update_trackpad_buttons) {
+          if (const auto status = emit_trackpad_tool_buttons(touching_after); !status.ok()) {
+            return status;
+          }
+        } else {
+          if (const auto status = emit_event(EV_KEY, BTN_TOUCH, touching_after > 0 ? 1 : 0); !status.ok()) {
+            return status;
+          }
+        }
+
+        if (next_primary == contact.id && contact.touching) {
+          if (const auto status = emit_primary_axes(contact); !status.ok()) {
+            return status;
+          }
+        } else if (primary_contact_id_ == contact.id && next_primary.has_value()) {
+          const auto next = latest_contacts_.find(*next_primary);
+          if (next != latest_contacts_.end()) {
+            if (const auto status = emit_primary_axes(next->second); !status.ok()) {
               return status;
             }
-          } else {
-            if (const auto status = emit_event(EV_KEY, BTN_TOUCH, 1); !status.ok()) {
-              return status;
-            }
+          }
+        } else if (primary_contact_id_ == contact.id && !next_primary.has_value()) {
+          if (const auto status = emit_event(EV_ABS, ABS_PRESSURE, 0); !status.ok()) {
+            return status;
           }
         }
 
         const auto x = scale_pointer_axis_to_desktop(contact.x, touch_axis_max_x, contact.viewport, desktop_, true);
         const auto y = scale_pointer_axis_to_desktop(contact.y, touch_axis_max_y, contact.viewport, desktop_, false);
-        const auto pressure = scale_normalized_axis(contact.pressure, touch_pressure_max);
-
-        // ABS_X/Y/PRESSURE are the legacy single-pointer axes, not the MT
-        // slot axes. Keep them bound to one active contact instead of letting
-        // every finger move the primary pointer.
-        const auto is_primary = !primary_contact_id_.has_value() || *primary_contact_id_ == contact.id;
-        if (is_primary) {
-          if (const auto status = emit_primary_axes(contact); !status.ok()) {
-            return status;
-          }
-        }
         if (const auto status = emit_event(EV_ABS, ABS_MT_POSITION_X, x); !status.ok()) {
           return status;
         }
         if (const auto status = emit_event(EV_ABS, ABS_MT_POSITION_Y, y); !status.ok()) {
           return status;
         }
+        // Pressure and touch geometry must be zero during hover, even if
+        // the client sends a stale pressure measurement.
+        const auto pressure = contact.touching ? scale_normalized_axis(contact.pressure, touch_pressure_max) : 0;
         if (const auto status = emit_event(EV_ABS, ABS_MT_PRESSURE, pressure); !status.ok()) {
           return status;
         }
-        const auto major = scale_touch_size(contact.contact_major_axis, contact.viewport, desktop_);
-        const auto minor = scale_touch_size(contact.contact_minor_axis, contact.viewport, desktop_);
+        if (const auto status = emit_event(EV_ABS, ABS_MT_DISTANCE, contact.touching ? 0 : 1); !status.ok()) {
+          return status;
+        }
+        const auto major = contact.touching ? scale_touch_size(contact.contact_major_axis, contact.viewport, desktop_) : 0;
+        const auto minor = contact.touching ? scale_touch_size(contact.contact_minor_axis, contact.viewport, desktop_) : 0;
         if (const auto status = emit_event(EV_ABS, ABS_MT_TOUCH_MAJOR, major); !status.ok()) {
           return status;
         }
@@ -2115,9 +2143,7 @@ namespace lvh::detail {
           return status;
         }
         latest_contacts_[contact.id] = contact;
-        if (is_primary) {
-          primary_contact_id_ = contact.id;
-        }
+        primary_contact_id_ = next_primary;
         return OperationStatus::success();
       }
 
@@ -2140,27 +2166,30 @@ namespace lvh::detail {
           return status;
         }
 
-        // Promote a surviving touch and restore its saved position and
-        // pressure so single-pointer consumers do not jump to stale axes.
-        auto next_primary = std::optional<std::int32_t> {};
-        if (was_primary && !contacts_.empty()) {
-          const auto oldest_slot = std::min_element(contacts_.begin(), contacts_.end(), [](const auto &a, const auto &b) {
-            return a.second < b.second;
-          });
-          next_primary = oldest_slot->first;
-          if (const auto last = latest_contacts_.find(*next_primary); last != latest_contacts_.end()) {
-            if (const auto status = emit_primary_axes(last->second); !status.ok()) {
+        auto next_primary = primary_contact_id_;
+        if (was_primary) {
+          next_primary = oldest_touching_contact(std::nullopt);
+          if (next_primary.has_value()) {
+            const auto next = latest_contacts_.find(*next_primary);
+            if (next != latest_contacts_.end()) {
+              if (const auto status = emit_primary_axes(next->second); !status.ok()) {
+                return status;
+              }
+            }
+          } else {
+            if (const auto status = emit_event(EV_ABS, ABS_PRESSURE, 0); !status.ok()) {
               return status;
             }
           }
         }
 
+        const auto touching_after = touching_count(std::nullopt, false);
         if (update_trackpad_buttons) {
-          if (const auto status = emit_trackpad_tool_buttons(); !status.ok()) {
+          if (const auto status = emit_trackpad_tool_buttons(touching_after); !status.ok()) {
             return status;
           }
-        } else if (contacts_.empty()) {
-          if (const auto status = emit_event(EV_KEY, BTN_TOUCH, 0); !status.ok()) {
+        } else {
+          if (const auto status = emit_event(EV_KEY, BTN_TOUCH, touching_after > 0 ? 1 : 0); !status.ok()) {
             return status;
           }
         }
@@ -2168,9 +2197,7 @@ namespace lvh::detail {
         if (const auto status = sync(); !status.ok()) {
           return status;
         }
-        if (was_primary) {
-          primary_contact_id_ = next_primary;
-        }
+        primary_contact_id_ = next_primary;
         return OperationStatus::success();
       }
 
@@ -2185,6 +2212,31 @@ namespace lvh::detail {
       }
 
     private:
+      std::size_t touching_count(std::optional<std::int32_t> replace_id, bool replacement_touching) const {
+        std::size_t count = replace_id.has_value() && replacement_touching ? 1U : 0U;
+        for (const auto &[id, state] : latest_contacts_) {
+          if (id != replace_id && state.touching) {
+            ++count;
+          }
+        }
+        return count;
+      }
+
+      std::optional<std::int32_t> oldest_touching_contact(std::optional<std::int32_t> exclude_id) const {
+        std::optional<std::int32_t> result;
+        auto lowest_slot = touch_max_contacts;
+        for (const auto &[id, state] : latest_contacts_) {
+          if (id == exclude_id || !state.touching) {
+            continue;
+          }
+          if (const auto slot = contacts_.find(id); slot != contacts_.end() && slot->second < lowest_slot) {
+            lowest_slot = slot->second;
+            result = id;
+          }
+        }
+        return result;
+      }
+
       OperationStatus emit_primary_axes(const TouchContact &contact) {
         const auto x = scale_pointer_axis_to_desktop(contact.x, touch_axis_max_x, contact.viewport, desktop_, true);
         const auto y = scale_pointer_axis_to_desktop(contact.y, touch_axis_max_y, contact.viewport, desktop_, false);
@@ -2225,8 +2277,7 @@ namespace lvh::detail {
         return emit_event(EV_ABS, ABS_MT_SLOT, slot);
       }
 
-      OperationStatus emit_trackpad_tool_buttons() {
-        const auto count = contacts_.size();
+      OperationStatus emit_trackpad_tool_buttons(std::size_t count) {
         if (const auto status = emit_event(EV_KEY, BTN_TOUCH, count == 0 ? 0 : 1); !status.ok()) {
           return status;
         }
