@@ -873,6 +873,32 @@ TEST_F(LinuxBackendTest, PipeBackedUinputMouseAccumulatesLegacyScrollDetentsPerA
   );
 }
 
+TEST_F(LinuxBackendTest, UinputStopsAcceptingEventsAfterIrrecoverableWrites) {
+  for (const auto type : {
+         lvh::DeviceType::keyboard,
+         lvh::DeviceType::touchscreen,
+         lvh::DeviceType::pen_tablet,
+         lvh::DeviceType::gamepad,
+       }) {
+    for (const auto short_write : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(type));
+      SCOPED_TRACE(short_write);
+      const auto observation = lvh::detail::test::linux_uinput_write_failure_sequence(type, short_write);
+      EXPECT_EQ(observation.first_submit.code(), lvh::ErrorCode::backend_failure);
+      EXPECT_EQ(observation.second_submit.code(), lvh::ErrorCode::device_closed);
+      EXPECT_EQ(observation.calls_after_first, 2);
+      EXPECT_EQ(observation.calls_after_second, observation.calls_after_first)
+        << "a corrupt input frame must not be followed by more kernel writes";
+    }
+  }
+}
+
+TEST_F(LinuxBackendTest, UinputRetriesInterruptedWritesWithoutClosingDevice) {
+  const auto [status, calls] = lvh::detail::test::linux_uinput_interrupted_write_retry();
+  EXPECT_TRUE(status.ok()) << status.message();
+  EXPECT_EQ(calls, 3) << "one interrupted write plus key and SYN events";
+}
+
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   const lvh::TouchContact contact {
     .id = 7,
