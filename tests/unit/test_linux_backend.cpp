@@ -935,8 +935,7 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
 TEST_F(LinuxBackendTest, PenReleasePreservesHoverAndUnknownZeroPressureMeansContact) {
   const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
     {.tool = lvh::PenToolType::pen, .x = 0.25F, .y = 0.5F, .pressure = 0.0F},
-    {.tool = lvh::PenToolType::pen, .x = 1.0F, .y = 1.0F, .pressure = 1.0F,
-     .transition = lvh::PointerTransition::release},
+    {.tool = lvh::PenToolType::pen, .x = 1.0F, .y = 1.0F, .pressure = 1.0F, .transition = lvh::PointerTransition::release},
     {.tool = lvh::PenToolType::pen, .x = 0.5F, .y = 0.5F, .distance = 0.4F},
   });
   ASSERT_TRUE(result.status.ok()) << result.status.message();
