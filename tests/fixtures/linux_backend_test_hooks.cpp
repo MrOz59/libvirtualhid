@@ -1507,6 +1507,23 @@ namespace lvh::detail::test {
     return {std::move(status), std::move(records)};
   }
 
+  LinuxInputSubmissionResult linux_uinput_touchscreen_viewport_pipe(
+    const TouchContact &contact,
+    PointerViewport desktop
+  ) {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    UinputTouchscreen touchscreen {descriptors[1], desktop};
+    const auto status = touchscreen.place_contact(contact);
+    static_cast<void>(touchscreen.close());
+    auto records = read_input_events_until_eof(descriptors[0]);
+    static_cast<void>(::close(descriptors[0]));
+    return {status, std::move(records)};
+  }
+
   LinuxInputSubmissionResult linux_uinput_trackpad_contact_pipe(const TouchContact &contact) {
     std::array<int, 2> descriptors {-1, -1};
     if (::pipe(descriptors.data()) != 0) {
@@ -1548,6 +1565,23 @@ namespace lvh::detail::test {
     auto records = read_input_events_until_eof(descriptors[0]);
     static_cast<void>(::close(descriptors[0]));
     return {std::move(status), std::move(records)};
+  }
+
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_viewport_pipe(
+    const PenToolState &state,
+    PointerViewport desktop
+  ) {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    UinputPenTablet pen_tablet {descriptors[1], desktop};
+    const auto status = pen_tablet.place_tool(state);
+    static_cast<void>(pen_tablet.close());
+    auto records = read_input_events_until_eof(descriptors[0]);
+    static_cast<void>(::close(descriptors[0]));
+    return {status, std::move(records)};
   }
 
   LinuxInputSubmissionResult linux_uinput_trackpad_multi_contact_pipe() {

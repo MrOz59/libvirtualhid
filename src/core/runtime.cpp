@@ -343,7 +343,45 @@ namespace lvh {
       return message.str();
     }
 
+    OperationStatus validate_optional_desktop(const PointerViewport &desktop) {
+      const auto empty = desktop.width == 0 && desktop.height == 0 && desktop.offset_x == 0 && desktop.offset_y == 0;
+      if (empty) {
+        return OperationStatus::success();
+      }
+      if (desktop.width <= 0 || desktop.height <= 0) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "pointer desktop requires positive dimensions");
+      }
+      return OperationStatus::success();
+    }
+
+    OperationStatus validate_target_viewport(const PointerViewport &desktop, const PointerViewport &viewport) {
+      // Preserve the old behavior when the caller has not configured a desktop.
+      if (desktop.width == 0) {
+        return OperationStatus::success();
+      }
+      if (viewport.width == 0 && viewport.height == 0 && viewport.offset_x == 0 && viewport.offset_y == 0) {
+        return OperationStatus::success();
+      }
+      if (viewport.width <= 0 || viewport.height <= 0) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "pointer viewport requires positive dimensions");
+      }
+      const auto right = static_cast<std::int64_t>(viewport.offset_x) + viewport.width;
+      const auto bottom = static_cast<std::int64_t>(viewport.offset_y) + viewport.height;
+      const auto desktop_right = static_cast<std::int64_t>(desktop.offset_x) + desktop.width;
+      const auto desktop_bottom = static_cast<std::int64_t>(desktop.offset_y) + desktop.height;
+      if (
+        viewport.offset_x < desktop.offset_x || viewport.offset_y < desktop.offset_y ||
+        right > desktop_right || bottom > desktop_bottom
+      ) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "pointer viewport must be inside the desktop");
+      }
+      return OperationStatus::success();
+    }
+
     OperationStatus validate_touchscreen_options(const CreateTouchscreenOptions &options) {
+      if (const auto status = validate_optional_desktop(options.desktop); !status.ok()) {
+        return status;
+      }
       if (options.profile.device_type != DeviceType::touchscreen) {
         return OperationStatus::failure(ErrorCode::unsupported_profile, "device profile is not a touchscreen");
       }
@@ -366,6 +404,9 @@ namespace lvh {
     }
 
     OperationStatus validate_pen_tablet_options(const CreatePenTabletOptions &options) {
+      if (const auto status = validate_optional_desktop(options.desktop); !status.ok()) {
+        return status;
+      }
       if (options.profile.device_type != DeviceType::pen_tablet) {
         return OperationStatus::failure(ErrorCode::unsupported_profile, "device profile is not a pen tablet");
       }
@@ -922,6 +963,9 @@ namespace lvh {
     if (const auto validation = validate_touch_contact(contact); !validation.ok()) {
       return validation;
     }
+    if (const auto validation = validate_target_viewport(device_->options.desktop, contact.viewport); !validation.ok()) {
+      return validation;
+    }
 
     return submit_touch_event(
       device_,
@@ -1166,6 +1210,11 @@ namespace lvh {
   OperationStatus PenTablet::place_tool(const PenToolState &state) {
     if (const auto validation = validate_pen_tool_state(state); !validation.ok()) {
       return validation;
+    }
+    if (state.transition == PointerTransition::update) {
+      if (const auto validation = validate_target_viewport(device_->options.desktop, state.viewport); !validation.ok()) {
+        return validation;
+      }
     }
     return with_device(device_, [&state](auto &device) {
       if (!device.open) {

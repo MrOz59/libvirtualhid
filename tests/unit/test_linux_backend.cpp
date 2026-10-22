@@ -968,6 +968,41 @@ TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
   }
 }
 
+TEST_F(LinuxBackendTest, TouchAndPenMapIntoTargetViewportWithDesktopBounds) {
+  const lvh::PointerViewport desktop {.offset_x = -1920, .offset_y = 0, .width = 3840, .height = 1080};
+  const lvh::PointerViewport right_display {.offset_x = 0, .offset_y = 0, .width = 1920, .height = 1080};
+
+  const auto touch = lvh::detail::test::linux_uinput_touchscreen_viewport_pipe(
+    {.id = 1, .x = 0.0F, .y = 0.0F, .pressure = 0.5F, .viewport = right_display},
+    desktop
+  );
+  ASSERT_TRUE(touch.status.ok()) << touch.status.message();
+
+  const auto pen = lvh::detail::test::linux_uinput_pen_tablet_viewport_pipe(
+    {.tool = lvh::PenToolType::pen, .x = 0.0F, .y = 0.0F, .pressure = 0.5F, .viewport = right_display},
+    desktop
+  );
+  ASSERT_TRUE(pen.status.ok()) << pen.status.message();
+
+  const auto expect_position = [](const auto &events, int x) {
+    const auto event = std::ranges::find_if(events, [](const auto &entry) {
+      return entry.type == EV_ABS && entry.code == ABS_X;
+    });
+    ASSERT_NE(event, events.end());
+    EXPECT_EQ(event->value, x);
+  };
+  // The right-hand monitor starts at half of the 3840-wide desktop.
+  expect_position(touch.events, 9600);
+  expect_position(pen.events, 9600);
+
+  const auto legacy = lvh::detail::test::linux_uinput_touchscreen_viewport_pipe(
+    {.id = 1, .x = 0.0F, .y = 0.0F, .pressure = 0.5F, .viewport = right_display},
+    {}
+  );
+  ASSERT_TRUE(legacy.status.ok()) << legacy.status.message();
+  expect_position(legacy.events, 0);
+}
+
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
   auto result = lvh::detail::test::linux_uinput_trackpad_multi_contact_pipe();
   ASSERT_TRUE(result.status.ok()) << result.status.message();

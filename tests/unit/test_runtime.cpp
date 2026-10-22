@@ -498,6 +498,55 @@ TEST(RuntimeTest, RejectsNonFinitePointerInputBeforeSubmission) {
   EXPECT_EQ(pen.pen_tablet->submit_count(), 3U);
 }
 
+TEST(RuntimeTest, ValidatesOptionalTouchAndPenDesktopGeometry) {
+  auto runtime = lvh::Runtime::create();
+
+  lvh::CreateTouchscreenOptions touch_options;
+  touch_options.profile = lvh::profiles::touchscreen();
+  touch_options.desktop = {.width = 1920};
+  EXPECT_EQ(runtime->create_touchscreen(touch_options).status.code(), lvh::ErrorCode::invalid_argument);
+
+  touch_options.desktop = {.offset_x = -1920, .width = 3840, .height = 1080};
+  auto touch = runtime->create_touchscreen(touch_options);
+  ASSERT_TRUE(touch);
+
+  const lvh::TouchContact valid {
+    .id = 1,
+    .x = 0.5F,
+    .y = 0.5F,
+    .pressure = 0.5F,
+    .viewport = {.offset_x = 0, .width = 1920, .height = 1080},
+  };
+  EXPECT_TRUE(touch.touchscreen->place_contact(valid).ok());
+  auto invalid = valid;
+  invalid.viewport.offset_x = 1920;
+  EXPECT_EQ(touch.touchscreen->place_contact(invalid).code(), lvh::ErrorCode::invalid_argument);
+  invalid = valid;
+  invalid.viewport.height = 0;
+  EXPECT_EQ(touch.touchscreen->place_contact(invalid).code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(touch.touchscreen->submit_count(), 1U);
+
+  lvh::CreatePenTabletOptions pen_options;
+  pen_options.profile = lvh::profiles::pen_tablet();
+  pen_options.desktop = {.width = -1, .height = 1080};
+  EXPECT_EQ(runtime->create_pen_tablet(pen_options).status.code(), lvh::ErrorCode::invalid_argument);
+
+  pen_options.desktop = touch_options.desktop;
+  auto pen = runtime->create_pen_tablet(pen_options);
+  ASSERT_TRUE(pen);
+  lvh::PenToolState pen_state {
+    .tool = lvh::PenToolType::pen,
+    .pressure = 0.5F,
+    .viewport = {.offset_x = 0, .width = 1920, .height = 1080},
+  };
+  EXPECT_TRUE(pen.pen_tablet->place_tool(pen_state).ok());
+  pen_state.viewport.offset_x = 1920;
+  EXPECT_EQ(pen.pen_tablet->place_tool(pen_state).code(), lvh::ErrorCode::invalid_argument);
+  pen_state.transition = lvh::PointerTransition::release;
+  EXPECT_TRUE(pen.pen_tablet->place_tool(pen_state).ok());
+  EXPECT_EQ(pen.pen_tablet->submit_count(), 2U);
+}
+
 TEST_F(LinuxRuntimeTest, LinuxUhidSmokeTestRequiresPrerequisites) {
   ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
 
