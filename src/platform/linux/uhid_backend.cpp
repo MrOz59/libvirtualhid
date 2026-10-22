@@ -3555,7 +3555,10 @@ namespace lvh::detail {
         }
 
         const auto event_buffer = std::as_bytes(std::span {&event, 1U});
-        const auto result = system_write(fd_, event_buffer);
+        std::ptrdiff_t result = -1;
+        do {
+          result = system_write(fd_, event_buffer);
+        } while (result < 0 && errno == EINTR);
         if (result < 0) {
           return system_error_status(backend_failure, "failed to write UHID event", errno);
         }
@@ -3594,7 +3597,9 @@ namespace lvh::detail {
                    ReadEventResult::retry :
                    ReadEventResult::stop;
         }
-        return result_read == 0 ? ReadEventResult::stop : ReadEventResult::event;
+        // UHID messages are complete fixed-size records, not a byte stream.
+        // Never dispatch a truncated record padded by the zeroed event buffer.
+        return static_cast<std::size_t>(result_read) == sizeof(event) ? ReadEventResult::event : ReadEventResult::stop;
       }
 
       void read_loop(std::stop_token stop_token) {

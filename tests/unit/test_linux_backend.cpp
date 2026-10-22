@@ -1657,6 +1657,16 @@ TEST_F(LinuxBackendTest, FakeUhidSyscallsCoverFailureBranches) {
   EXPECT_TRUE(lvh::detail::test::linux_uhid_read_loop_fake_output_without_callback().ok());
 }
 
+TEST_F(LinuxBackendTest, UhidRetriesInterruptedWritesAndDropsTruncatedReadEvents) {
+  const auto [submit_status, submit_calls] = lvh::detail::test::linux_uhid_submit_fake_interrupted_write();
+  EXPECT_TRUE(submit_status.ok()) << submit_status.message();
+  EXPECT_EQ(submit_calls, 2) << "the interrupted write must retry the same event";
+
+  const auto [read_status, read_writes] = lvh::detail::test::linux_uhid_read_loop_fake_short_read();
+  EXPECT_TRUE(read_status.ok()) << read_status.message();
+  EXPECT_EQ(read_writes, 2) << "truncated GET_REPORT must not generate a reply";
+}
+
 TEST_F(LinuxBackendTest, FakeUinputConstructionCoversCapabilitiesAndFailureBranches) {
   using enum lvh::GamepadProfileKind;
 

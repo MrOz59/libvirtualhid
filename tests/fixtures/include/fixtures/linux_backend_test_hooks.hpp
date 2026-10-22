@@ -1371,6 +1371,13 @@ namespace lvh::detail::test {
   OperationStatus linux_uhid_submit_fake_short_write();
 
   /**
+   * @brief Retry an interrupted UHID input report write.
+   *
+   * @return Submission status and number of attempted writes.
+   */
+  std::pair<OperationStatus, int> linux_uhid_submit_fake_interrupted_write();
+
+  /**
    * @brief Try closing a UHID gamepad while fake destroy write fails.
    *
    * @return Close status.
@@ -1404,6 +1411,13 @@ namespace lvh::detail::test {
    * @return Close status after the scripted read loop exits.
    */
   OperationStatus linux_uhid_read_loop_fake_read_error();
+
+  /**
+   * @brief Drop a truncated UHID input record without replying to it.
+   *
+   * @return Close status and count of UHID writes, including create/destroy.
+   */
+  std::pair<OperationStatus, int> linux_uhid_read_loop_fake_short_read();
 
   /**
    * @brief Exercise UHID read-loop output handling when no callback is registered.
