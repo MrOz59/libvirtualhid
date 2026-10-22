@@ -1642,7 +1642,7 @@ namespace lvh::detail::test {
     return pen_tablet.button(PenButton::primary, true);
   }
 
-  LinuxUhidRoundTripResult linux_uhid_socketpair_roundtrip() {
+  LinuxUhidRoundTripResult linux_uhid_socketpair_roundtrip(std::string_view linux_phys) {
     LinuxUhidRoundTripResult result;
     std::array<int, 2> descriptors {-1, -1};
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors.data()) != 0) {
@@ -1655,6 +1655,7 @@ namespace lvh::detail::test {
     auto profile = profiles::xbox_360();
     CreateGamepadOptions options;
     options.profile = profile;
+    options.profile.linux_phys = linux_phys;
     options.metadata.stable_id = "linux-uhid-roundtrip";
 
     UhidGamepad gamepad {descriptors[0]};

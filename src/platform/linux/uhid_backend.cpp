@@ -1554,6 +1554,30 @@ namespace lvh::detail {
         return {status, nullptr};
       }
 
+#if defined(__linux__)
+      // libevdev creates the device immediately, so set phys on the same
+      // /dev/uinput fd before libevdev issues UI_DEV_CREATE.
+      if (!profile.linux_phys.empty()) {
+        if (profile.linux_phys.size() >= UINPUT_MAX_NAME_SIZE ||
+            profile.linux_phys.find('\0') != std::string::npos) {
+          return {
+            OperationStatus::failure(ErrorCode::invalid_argument, "invalid uinput physical path"),
+            nullptr,
+          };
+        }
+        if (system_ioctl(fd, UI_SET_PHYS, reinterpret_cast<unsigned long>(profile.linux_phys.c_str())) < 0) {
+          return {ioctl_status("failed to set uinput physical path"), nullptr};
+        }
+      }
+#else
+      if (!profile.linux_phys.empty()) {
+        return {
+          OperationStatus::failure(ErrorCode::unsupported_profile, "linux_phys requires Linux"),
+          nullptr,
+        };
+      }
+#endif
+
       libevdev_uinput *uinput_device = nullptr;
       if (const auto result = libevdev_uinput_create_from_device(device.get(), fd, &uinput_device); result < 0) {
         return {
@@ -3115,6 +3139,10 @@ namespace lvh::detail {
         if (transport_profile.report_descriptor.size() > sizeof(request.rd_data)) {
           return OperationStatus::failure(ErrorCode::unsupported_profile, "HID report descriptor is too large for UHID");
         }
+        if (transport_profile.linux_phys.size() >= sizeof(request.phys) ||
+            transport_profile.linux_phys.find('\0') != std::string::npos) {
+          return OperationStatus::failure(ErrorCode::invalid_argument, "invalid UHID physical path");
+        }
 
         event.type = UHID_CREATE2;
         const auto stable_id = options.metadata.stable_id.empty() ? std::to_string(id) : options.metadata.stable_id;
@@ -3123,12 +3151,14 @@ namespace lvh::detail {
           playstation_mac_address_ = parse_mac_address(options.metadata.stable_id).value_or(generated_mac_address(id));
           unique_id_ = format_mac_address(playstation_mac_address_);
         }
-        physical_id_ = std::format(
-          "libvirtualhid/uhid/{:04x}:{:04x}/{}",
-          transport_profile.vendor_id,
-          transport_profile.product_id,
-          id
-        );
+        physical_id_ = transport_profile.linux_phys.empty()
+                         ? std::format(
+                             "libvirtualhid/uhid/{:04x}:{:04x}/{}",
+                             transport_profile.vendor_id,
+                             transport_profile.product_id,
+                             id
+                           )
+                         : transport_profile.linux_phys;
 
         device_name_ = uhid_gamepad_name(transport_profile);
         copy_string(request.name, device_name_);
