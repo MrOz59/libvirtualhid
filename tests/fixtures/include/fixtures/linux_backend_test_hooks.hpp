@@ -885,6 +885,14 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_gamepad_submit_pipe(GamepadProfileKind kind, const GamepadState &state);
 
   /**
+   * @brief Send an initial state, identical frames, and button/axis changes.
+   *
+   * @param kind Uinput gamepad profile kind.
+   * @return Captured event frames for redundancy regression tests.
+   */
+  LinuxInputSubmissionResult linux_uinput_gamepad_delta_pipe(GamepadProfileKind kind);
+
+  /**
    * @brief Exercise uinput gamepad force-feedback upload and playback.
    *
    * @param kind Gamepad profile kind.
