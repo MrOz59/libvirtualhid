@@ -932,6 +932,79 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
   EXPECT_EQ(lvh::detail::test::linux_uinput_pen_tablet_closed_status().code(), lvh::ErrorCode::device_closed);
 }
 
+TEST_F(LinuxBackendTest, PenReleasePreservesHoverAndUnknownZeroPressureMeansContact) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::pen, .x = 0.25F, .y = 0.5F, .pressure = 0.0F},
+    {.tool = lvh::PenToolType::pen, .x = 1.0F, .y = 1.0F, .pressure = 1.0F,
+     .transition = lvh::PointerTransition::release},
+    {.tool = lvh::PenToolType::pen, .x = 0.5F, .y = 0.5F, .distance = 0.4F},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::vector<int> touch_states;
+  std::vector<int> proximity_states;
+  int x_positions = 0;
+  for (const auto &event : result.events) {
+    if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+      touch_states.push_back(event.value);
+    }
+    if (event.type == EV_KEY && event.code == BTN_TOOL_PEN) {
+      proximity_states.push_back(event.value);
+    }
+    if (event.type == EV_ABS && event.code == ABS_X) {
+      ++x_positions;
+    }
+  }
+
+  EXPECT_EQ(touch_states, (std::vector<int> {1, 0, 0}));
+  EXPECT_EQ(proximity_states, (std::vector<int> {1}));
+  EXPECT_EQ(x_positions, 2) << "release must not use possibly stale position";
+}
+
+TEST_F(LinuxBackendTest, PenCancelAndLeaveEndProximityUntilNextUpdate) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::pen, .pressure = 0.5F},
+    {.tool = lvh::PenToolType::pen, .transition = lvh::PointerTransition::cancel},
+    {.tool = lvh::PenToolType::pen, .distance = 0.4F},
+    {.tool = lvh::PenToolType::pen, .transition = lvh::PointerTransition::leave},
+    {.tool = lvh::PenToolType::pen, .pressure = 0.25F},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::vector<int> touch_states;
+  std::vector<int> proximity_states;
+  for (const auto &event : result.events) {
+    if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+      touch_states.push_back(event.value);
+    }
+    if (event.type == EV_KEY && event.code == BTN_TOOL_PEN) {
+      proximity_states.push_back(event.value);
+    }
+  }
+  EXPECT_EQ(touch_states, (std::vector<int> {1, 0, 0, 0, 1}));
+  EXPECT_EQ(proximity_states, (std::vector<int> {1, 0, 1, 0, 1}));
+}
+
+TEST_F(LinuxBackendTest, PenPressureTakesPrecedenceOverDistanceWhenBothArePresent) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::pen, .pressure = 0.5F, .distance = 0.75F},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  const auto saw_contact = std::ranges::any_of(result.events, [](const auto &event) {
+    return event.type == EV_KEY && event.code == BTN_TOUCH && event.value == 1;
+  });
+  const auto saw_pressure = std::ranges::any_of(result.events, [](const auto &event) {
+    return event.type == EV_ABS && event.code == ABS_PRESSURE && event.value > 0;
+  });
+  const auto saw_nonzero_distance = std::ranges::any_of(result.events, [](const auto &event) {
+    return event.type == EV_ABS && event.code == ABS_DISTANCE && event.value > 0;
+  });
+  EXPECT_TRUE(saw_contact);
+  EXPECT_TRUE(saw_pressure);
+  EXPECT_FALSE(saw_nonzero_distance);
+}
+
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesReuseSlotsWithNewTrackingIds) {
   for (const auto device_type : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
     const auto result = lvh::detail::test::linux_uinput_touch_contact_reuse_pipe(device_type);
