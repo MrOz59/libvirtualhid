@@ -121,9 +121,14 @@ jobs:
 
           # Four hardware-emulation/SDL PlayStation tests depend on the
           # runner's HID kernel drivers and are run separately, below.
+          playstation_filter='LinuxConsumerTest.SdlSeesDualSenseUsbControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualShock4UsbControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualShock4BluetoothControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualSenseBluetoothControllerDiscovery'
+          required_filter="-${playstation_filter}"
           ./test_libvirtualhid \
             --gtest_color=yes \
-            --gtest_filter='-LinuxConsumerTest.SdlSeesDualSenseUsbControllerBehavior:LinuxConsumerTest.SdlSeesDualShock4UsbControllerBehavior:LinuxConsumerTest.SdlSeesDualShock4BluetoothControllerBehavior:LinuxConsumerTest.SdlSeesDualSenseBluetoothControllerDiscovery' \
+            --gtest_filter="${required_filter}" \
             --gtest_output=xml:../reports/junit.xml
 
       - name: Run runner-dependent PlayStation SDL/UHID tests (experimental)
@@ -134,16 +139,20 @@ jobs:
         run: |
           set -euo pipefail
           cd cmake-build-ci/tests
+          playstation_filter='LinuxConsumerTest.SdlSeesDualSenseUsbControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualShock4UsbControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualShock4BluetoothControllerBehavior'
+          playstation_filter+=':LinuxConsumerTest.SdlSeesDualSenseBluetoothControllerDiscovery'
           ./test_libvirtualhid \
             --gtest_color=yes \
-            --gtest_filter='LinuxConsumerTest.SdlSeesDualSenseUsbControllerBehavior:LinuxConsumerTest.SdlSeesDualShock4UsbControllerBehavior:LinuxConsumerTest.SdlSeesDualShock4BluetoothControllerBehavior:LinuxConsumerTest.SdlSeesDualSenseBluetoothControllerDiscovery' \
+            --gtest_filter="${playstation_filter}" \
             --gtest_output=xml:../reports/playstation-junit.xml
 
       - name: Report PlayStation driver-dependent result
         if: always() && steps.playstation.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::PlayStation SDL/UHID integration failed on this hosted kernel; see playstation-junit.xml. This is tracked separately from required unit and uinput tests."
+          echo "::warning::PlayStation SDL/UHID checks failed on this runner; see playstation-junit.xml."
           {
             echo "### PlayStation HID integration (experimental)"
             echo "The hosted runner failed a kernel-driver-dependent PlayStation test."
