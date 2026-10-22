@@ -1345,7 +1345,17 @@ namespace lvh::detail {
         return status;
       }
 
-      std::vector buttons {BTN_TOUCH, BTN_STYLUS, BTN_STYLUS2, BTN_TOOL_PEN, BTN_TOOL_RUBBER, BTN_TOOL_BRUSH, BTN_TOOL_PENCIL, BTN_TOOL_AIRBRUSH};
+      std::vector buttons {
+        BTN_TOUCH,
+        BTN_STYLUS,
+        BTN_STYLUS2,
+        BTN_TOOL_PEN,
+        BTN_TOOL_RUBBER,
+        BTN_TOOL_BRUSH,
+        BTN_TOOL_PENCIL,
+        BTN_TOOL_AIRBRUSH,
+        BTN_TOOL_FINGER,
+      };
 #if defined(BTN_STYLUS3)
       buttons.push_back(BTN_STYLUS3);
 #endif
@@ -2261,7 +2271,9 @@ namespace lvh::detail {
         case airbrush:
           return BTN_TOOL_AIRBRUSH;
         case touch:
-          return BTN_TOUCH;
+          // BTN_TOOL_FINGER identifies the selected tool; BTN_TOUCH indicates
+          // contact and is independently emitted by pressure/hover transitions.
+          return BTN_TOOL_FINGER;
         case unchanged:
           return -1;
       }

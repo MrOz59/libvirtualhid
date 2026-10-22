@@ -148,7 +148,7 @@ TEST_F(LinuxBackendTest, TranslatesMouseButtonsAndBusTypes) {
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::brush), BTN_TOOL_BRUSH);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::pencil), BTN_TOOL_PENCIL);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::airbrush), BTN_TOOL_AIRBRUSH);
-  EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::touch), BTN_TOUCH);
+  EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::touch), BTN_TOOL_FINGER);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(lvh::PenToolType::unchanged), -1);
   EXPECT_EQ(lvh::detail::test::linux_pen_tool(static_cast<lvh::PenToolType>(255)), -1);
   EXPECT_EQ(lvh::detail::test::linux_pen_button(lvh::PenButton::primary), BTN_STYLUS);
@@ -1063,6 +1063,29 @@ TEST_F(LinuxBackendTest, PenCancelAndLeaveEndProximityUntilNextUpdate) {
   EXPECT_EQ(proximity_states, (std::vector<int> {1, 0, 1, 0, 1}));
 }
 
+TEST_F(LinuxBackendTest, FingerToolDoesNotImplyTipContact) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::touch, .distance = 0.5F},
+    {.tool = lvh::PenToolType::touch, .pressure = 0.6F},
+    {.tool = lvh::PenToolType::unchanged, .transition = lvh::PointerTransition::release},
+    {.tool = lvh::PenToolType::unchanged, .transition = lvh::PointerTransition::leave},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::vector<int> tools;
+  std::vector<int> contacts;
+  for (const auto &event : result.events) {
+    if (event.type == EV_KEY && event.code == BTN_TOOL_FINGER) {
+      tools.push_back(event.value);
+    }
+    if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+      contacts.push_back(event.value);
+    }
+  }
+  EXPECT_EQ(tools, (std::vector<int> {1, 0}));
+  EXPECT_EQ(contacts, (std::vector<int> {0, 1, 0, 0}));
+}
+
 TEST_F(LinuxBackendTest, PenPressureTakesPrecedenceOverDistanceWhenBothArePresent) {
   const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
     {.tool = lvh::PenToolType::pen, .pressure = 0.5F, .distance = 0.75F},
@@ -1613,6 +1636,7 @@ TEST_F(LinuxBackendTest, FakeUinputConstructionCoversCapabilitiesAndFailureBranc
   EXPECT_TRUE(has_property(pen_tablet, INPUT_PROP_POINTER));
   EXPECT_TRUE(has_property(pen_tablet, INPUT_PROP_DIRECT));
   EXPECT_NE(find_code(pen_tablet, EV_KEY, BTN_TOOL_PEN), nullptr);
+  EXPECT_NE(find_code(pen_tablet, EV_KEY, BTN_TOOL_FINGER), nullptr);
   const auto *pen_x = find_code(pen_tablet, EV_ABS, ABS_X);
   ASSERT_NE(pen_x, nullptr);
   EXPECT_TRUE(pen_x->has_absinfo);
