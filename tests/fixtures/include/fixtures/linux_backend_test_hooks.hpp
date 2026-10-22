@@ -1023,6 +1023,14 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_touch_contact_reuse_pipe(DeviceType device_type);
 
   /**
+   * @brief Submit overlapping touch contacts and promote the remaining primary.
+   *
+   * @param device_type Touchscreen or trackpad device type.
+   * @return Captured Linux input events for primary and secondary contacts.
+   */
+  LinuxInputSubmissionResult linux_uinput_touch_primary_pointer_pipe(DeviceType device_type);
+
+  /**
    * @brief Submit invalid touchscreen contacts through pipe-backed devices.
    *
    * @return Final invalid-contact status.
