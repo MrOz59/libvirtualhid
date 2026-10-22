@@ -349,7 +349,8 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
       input_root.string(),
       hidraw_root.string(),
       "hermes-kms-unknown"
-    ).empty()
+    )
+      .empty()
   );
 
   const auto metadata_nodes = lvh::detail::test::linux_discover_hidraw_nodes_by_metadata(
