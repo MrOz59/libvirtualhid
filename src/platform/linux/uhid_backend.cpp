@@ -581,7 +581,8 @@ namespace lvh::detail {
     std::vector<DeviceNode> discover_input_nodes_by_name(
       const std::string &name,
       const std::filesystem::path &input_root,
-      const std::filesystem::path &hidraw_root
+      const std::filesystem::path &hidraw_root,
+      std::string_view linux_phys = {}
     ) {
       using enum DeviceNodeKind;
 
@@ -602,6 +603,12 @@ namespace lvh::detail {
           if (const auto sysfs_name = read_first_line(it->path() / "device" / "name"); !sysfs_name || *sysfs_name != name) {
             continue;
           }
+          if (!linux_phys.empty()) {
+            const auto sysfs_phys = read_first_line(it->path() / "device" / "phys");
+            if (!sysfs_phys || *sysfs_phys != linux_phys) {
+              continue;
+            }
+          }
 
           append_node(
             nodes,
@@ -612,7 +619,9 @@ namespace lvh::detail {
         }
       }
 
-      if (std::filesystem::exists(hidraw_root, error)) {
+      // uinput devices with explicit phys do not own HIDRAW nodes; scanning
+      // by name could include another session's unrelated UHID controller.
+      if (linux_phys.empty() && std::filesystem::exists(hidraw_root, error)) {
         for (std::filesystem::directory_iterator it {hidraw_root, error}, end; !error && it != end; it.increment(error)) {
           if (!hidraw_name_matches(it->path() / "device" / "uevent", name)) {
             continue;
@@ -626,8 +635,11 @@ namespace lvh::detail {
       return nodes;
     }
 
-    std::vector<DeviceNode> discover_input_nodes_by_name(const std::string &name) {
-      return discover_input_nodes_by_name(name, "/sys/class/input", "/sys/class/hidraw");
+    std::vector<DeviceNode> discover_input_nodes_by_name(
+      const std::string &name,
+      std::string_view linux_phys = {}
+    ) {
+      return discover_input_nodes_by_name(name, "/sys/class/input", "/sys/class/hidraw", linux_phys);
     }
 
     OperationStatus ioctl_status(const std::string &operation) {
@@ -1104,6 +1116,7 @@ namespace lvh::detail {
       libevdev_uinput *uinput_device_ = nullptr;
       std::atomic_bool open_ = true;
       std::mutex write_mutex_;
+      std::string linux_phys_;
     };
 
     struct LibevdevDeviceDeleter {
@@ -1602,6 +1615,7 @@ namespace lvh::detail {
       }
 
       uinput_device_ = result.device;
+      linux_phys_ = profile.linux_phys;
       return OperationStatus::success();
     }
 
@@ -1613,7 +1627,7 @@ namespace lvh::detail {
         }
       }
 #endif
-      return discover_input_nodes_by_name(device_name);
+      return discover_input_nodes_by_name(device_name, linux_phys_);
     }
 
     /**
