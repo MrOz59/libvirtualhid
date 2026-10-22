@@ -2437,10 +2437,12 @@ namespace lvh::detail {
         if (tool == PenToolType::unchanged || tool == last_tool_) {
           return OperationStatus::success();
         }
-        if (const auto status = emit_pen_tool(tool, 1); !status.ok()) {
+        // Evdev tablet tools are mutually exclusive: clear the old tool
+        // before asserting the new one within the same input frame.
+        if (const auto status = emit_pen_tool(last_tool_, 0); !status.ok()) {
           return status;
         }
-        if (const auto status = emit_pen_tool(last_tool_, 0); !status.ok()) {
+        if (const auto status = emit_pen_tool(tool, 1); !status.ok()) {
           return status;
         }
         last_tool_ = tool;

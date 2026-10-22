@@ -1164,6 +1164,33 @@ TEST_F(LinuxBackendTest, PenCancelAndLeaveEndProximityUntilNextUpdate) {
   EXPECT_EQ(proximity_states, (std::vector<int> {1, 0, 1, 0, 1}));
 }
 
+TEST_F(LinuxBackendTest, PenToolSwitchReleasesPreviousToolFirst) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
+    {.tool = lvh::PenToolType::pen, .distance = 0.5F},
+    {.tool = lvh::PenToolType::eraser, .distance = 0.5F},
+    {.tool = lvh::PenToolType::eraser, .distance = 0.25F},
+    {.tool = lvh::PenToolType::pen, .distance = 0.25F},
+  });
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::vector<std::pair<int, int>> tool_events;
+  for (const auto &event : result.events) {
+    if (event.type == EV_KEY && (event.code == BTN_TOOL_PEN || event.code == BTN_TOOL_RUBBER)) {
+      tool_events.emplace_back(event.code, event.value);
+    }
+  }
+  EXPECT_EQ(
+    tool_events,
+    (std::vector<std::pair<int, int>> {
+      {BTN_TOOL_PEN, 1},
+      {BTN_TOOL_PEN, 0},
+      {BTN_TOOL_RUBBER, 1},
+      {BTN_TOOL_RUBBER, 0},
+      {BTN_TOOL_PEN, 1},
+    })
+  );
+}
+
 TEST_F(LinuxBackendTest, FingerToolDoesNotImplyTipContact) {
   const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
     {.tool = lvh::PenToolType::touch, .distance = 0.5F},
