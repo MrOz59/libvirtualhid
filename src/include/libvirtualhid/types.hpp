@@ -555,6 +555,15 @@ namespace lvh {
      * @brief Consumer-defined stable identity string.
      */
     std::string stable_id;
+
+    /**
+     * @brief Optional full virtual-desktop bounds for Linux viewport mapping.
+     *
+     * When nonzero, the per-event viewport is mapped into these desktop
+     * bounds. With zero dimensions the backend retains its prior normalized
+     * coordinates behavior. Other platform backends ignore this field.
+     */
+    PointerViewport desktop;
   };
 
   /**
@@ -585,6 +594,15 @@ namespace lvh {
      * @brief Consumer-defined stable identity string.
      */
     std::string stable_id;
+
+    /**
+     * @brief Optional full virtual-desktop bounds for Linux viewport mapping.
+     *
+     * When nonzero, the per-event viewport is mapped into these desktop
+     * bounds. With zero dimensions the backend retains its prior normalized
+     * coordinates behavior. Other platform backends ignore this field.
+     */
+    PointerViewport desktop;
   };
 
   /**
