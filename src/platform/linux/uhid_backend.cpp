@@ -874,6 +874,28 @@ namespace lvh::detail {
       return static_cast<int>(std::lround(std::clamp(value, 0.0F, 1.0F) * static_cast<float>(maximum)));
     }
 
+    int scale_pointer_axis_to_desktop(
+      float normalized,
+      int maximum,
+      const PointerViewport &viewport,
+      const PointerViewport &desktop,
+      bool horizontal
+    ) {
+      const auto source_dimension = horizontal ? viewport.width : viewport.height;
+      const auto desktop_dimension = horizontal ? desktop.width : desktop.height;
+      if (source_dimension <= 0 || desktop_dimension <= 0) {
+        return scale_normalized_axis(normalized, maximum);
+      }
+
+      const auto source_offset = horizontal ? viewport.offset_x : viewport.offset_y;
+      const auto desktop_offset = horizontal ? desktop.offset_x : desktop.offset_y;
+      const auto offset = static_cast<std::int64_t>(source_offset) - desktop_offset;
+      const auto mapped = (static_cast<float>(offset) +
+                           std::clamp(normalized, 0.0F, 1.0F) * static_cast<float>(source_dimension - 1)) /
+                          static_cast<float>(desktop_dimension);
+      return scale_normalized_axis(mapped, maximum);
+    }
+
     int clamp_degrees(std::int32_t value) {
       return std::clamp(value, -90, 90);
     }
@@ -1952,8 +1974,9 @@ namespace lvh::detail {
      */
     class UinputTouchDevice: private UinputDevice {
     public:
-      explicit UinputTouchDevice(int file_descriptor):
-          UinputDevice {file_descriptor} {}
+      explicit UinputTouchDevice(int file_descriptor, PointerViewport desktop = {}):
+          UinputDevice {file_descriptor},
+          desktop_ {desktop} {}
 
       UinputTouchDevice(const UinputTouchDevice &) = delete;
       UinputTouchDevice &operator=(const UinputTouchDevice &) = delete;
@@ -1971,6 +1994,10 @@ namespace lvh::detail {
       }
 
     protected:
+      void set_desktop(PointerViewport desktop) {
+        desktop_ = desktop;
+      }
+
       OperationStatus create_touch_device(DeviceId id, const DeviceProfile &profile) {
         device_name_ = profile.name;
         return create_uinput_device(profile, id);
@@ -2010,8 +2037,8 @@ namespace lvh::detail {
           }
         }
 
-        const auto x = scale_normalized_axis(contact.x, touch_axis_max_x);
-        const auto y = scale_normalized_axis(contact.y, touch_axis_max_y);
+        const auto x = scale_pointer_axis_to_desktop(contact.x, touch_axis_max_x, contact.viewport, desktop_, true);
+        const auto y = scale_pointer_axis_to_desktop(contact.y, touch_axis_max_y, contact.viewport, desktop_, false);
         const auto pressure = scale_normalized_axis(contact.pressure, touch_pressure_max);
         if (const auto status = emit_event(EV_ABS, ABS_X, x); !status.ok()) {
           return status;
@@ -2127,6 +2154,7 @@ namespace lvh::detail {
       }
 
       std::string device_name_;
+      PointerViewport desktop_;
       std::map<std::int32_t, int> contacts_;
       int current_slot_ = -1;
       std::uint32_t next_tracking_id_ = 0;
@@ -2138,14 +2166,15 @@ namespace lvh::detail {
      */
     class UinputTouchscreen final: public BackendTouchscreen, private UinputTouchDevice {
     public:
-      explicit UinputTouchscreen(int file_descriptor):
-          UinputTouchDevice {file_descriptor} {}
+      explicit UinputTouchscreen(int file_descriptor, PointerViewport desktop = {}):
+          UinputTouchDevice {file_descriptor, desktop} {}
 
       ~UinputTouchscreen() override {
         static_cast<void>(close());
       }
 
       OperationStatus create(DeviceId id, const CreateTouchscreenOptions &options) {
+        set_desktop(options.desktop);
         return create_touch_device(id, options.profile);
       }
 
@@ -2250,8 +2279,9 @@ namespace lvh::detail {
      */
     class UinputPenTablet final: public BackendPenTablet, private UinputDevice {
     public:
-      explicit UinputPenTablet(int file_descriptor):
-          UinputDevice {file_descriptor} {}
+      explicit UinputPenTablet(int file_descriptor, PointerViewport desktop = {}):
+          UinputDevice {file_descriptor},
+          desktop_ {desktop} {}
 
       ~UinputPenTablet() override {
         static_cast<void>(close());
@@ -2259,6 +2289,7 @@ namespace lvh::detail {
 
       OperationStatus create(DeviceId id, const CreatePenTabletOptions &options) {
         device_name_ = options.profile.name;
+        desktop_ = options.desktop;
         return create_uinput_device(options.profile, id);
       }
 
@@ -2350,10 +2381,12 @@ namespace lvh::detail {
       }
 
       OperationStatus emit_pen_position(const PenToolState &state) {
-        if (const auto status = emit_event(EV_ABS, ABS_X, scale_normalized_axis(state.x, touch_axis_max_x)); !status.ok()) {
+        const auto x = scale_pointer_axis_to_desktop(state.x, touch_axis_max_x, state.viewport, desktop_, true);
+        const auto y = scale_pointer_axis_to_desktop(state.y, touch_axis_max_y, state.viewport, desktop_, false);
+        if (const auto status = emit_event(EV_ABS, ABS_X, x); !status.ok()) {
           return status;
         }
-        return emit_event(EV_ABS, ABS_Y, scale_normalized_axis(state.y, touch_axis_max_y));
+        return emit_event(EV_ABS, ABS_Y, y);
       }
 
       OperationStatus emit_pen_pressure(float pressure) {
@@ -2390,6 +2423,7 @@ namespace lvh::detail {
       }
 
       std::string device_name_;
+      PointerViewport desktop_;
       PenToolType last_tool_ = PenToolType::unchanged;
     };
 
