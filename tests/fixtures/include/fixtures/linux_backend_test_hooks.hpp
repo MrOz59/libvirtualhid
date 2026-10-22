@@ -896,6 +896,14 @@ namespace lvh::detail::test {
   LinuxUinputWriteFailureObservation linux_uinput_write_failure_sequence(DeviceType device_type, bool short_write);
 
   /**
+   * @brief Fail during a touch release and retry on the poisoned device.
+   *
+   * @param device_type Touchscreen or trackpad.
+   * @return First release status and subsequent release status.
+   */
+  std::pair<OperationStatus, OperationStatus> linux_uinput_touch_release_write_failure(DeviceType device_type);
+
+  /**
    * @brief Test retrying an interrupted uinput write without poisoning the device.
    *
    * @return Submission result and number of kernel writes attempted.
