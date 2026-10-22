@@ -1180,6 +1180,14 @@ namespace lvh::detail::test {
   OperationStatus linux_backend_keyboard_fake_create_failure();
 
   /**
+   * @brief Verify explicit Linux physical identity refuses XTest after uinput failure.
+   *
+   * @param fail_open Fail opening uinput when true; otherwise fail device creation.
+   * @return Failure status without fallback to another input backend.
+   */
+  OperationStatus linux_backend_keyboard_isolated_fake_failure(bool fail_open);
+
+  /**
    * @brief Create a Linux backend keyboard through a fake successful fallback after uinput creation fails.
    *
    * @return Creation status.
@@ -1199,6 +1207,14 @@ namespace lvh::detail::test {
    * @return Creation status.
    */
   OperationStatus linux_backend_mouse_fake_create_failure();
+
+  /**
+   * @brief Verify isolated mouse creation never falls back to XTest.
+   *
+   * @param fail_open Fail opening uinput when true; otherwise fail device creation.
+   * @return Failure status from uinput.
+   */
+  OperationStatus linux_backend_mouse_isolated_fake_failure(bool fail_open);
 
   /**
    * @brief Create a Linux backend mouse through a fake successful fallback after uinput creation fails.

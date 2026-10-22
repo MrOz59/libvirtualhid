@@ -3718,12 +3718,18 @@ namespace lvh::detail {
       BackendKeyboardCreationResult create_keyboard(DeviceId id, const CreateKeyboardOptions &options) override {
         const auto fd = open_uinput(O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (fd < 0) {
+          if (!options.profile.linux_phys.empty()) {
+            return {system_error_status(ErrorCode::backend_unavailable, "isolated keyboard requires /dev/uinput", errno), nullptr};
+          }
           return create_xtest_keyboard();
         }
 
         auto keyboard = std::make_unique<UinputKeyboard>(fd);
         if (const auto status = keyboard->create(id, options); !status.ok()) {
           static_cast<void>(keyboard->close());
+          if (!options.profile.linux_phys.empty()) {
+            return {status, nullptr};
+          }
           auto fallback = create_xtest_keyboard();
           if (fallback) {
             return fallback;
@@ -3737,18 +3743,28 @@ namespace lvh::detail {
       BackendMouseCreationResult create_mouse(DeviceId id, const CreateMouseOptions &options) override {
         const auto relative_fd = open_uinput(O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (relative_fd < 0) {
+          if (!options.profile.linux_phys.empty()) {
+            return {system_error_status(ErrorCode::backend_unavailable, "isolated mouse requires /dev/uinput", errno), nullptr};
+          }
           return create_xtest_mouse(options);
         }
 
         const auto absolute_fd = open_uinput(O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (absolute_fd < 0) {
+          const auto error = errno;
           static_cast<void>(system_close(relative_fd));
+          if (!options.profile.linux_phys.empty()) {
+            return {system_error_status(ErrorCode::backend_unavailable, "isolated mouse requires two /dev/uinput devices", error), nullptr};
+          }
           return create_xtest_mouse(options);
         }
 
         auto mouse = std::make_unique<UinputMouse>(relative_fd, absolute_fd);
         if (const auto status = mouse->create(id, options); !status.ok()) {
           static_cast<void>(mouse->close());
+          if (!options.profile.linux_phys.empty()) {
+            return {status, nullptr};
+          }
           auto fallback = create_xtest_mouse(options);
           if (fallback) {
             return fallback;

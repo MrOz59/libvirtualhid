@@ -2490,6 +2490,23 @@ namespace lvh::detail::test {
     return backend.create_keyboard(1, options).status;
   }
 
+  OperationStatus linux_backend_keyboard_isolated_fake_failure(bool fail_open) {
+    LinuxTestSyscalls syscalls;
+    enable_fake_device_syscalls(syscalls);
+    if (fail_open) {
+      syscalls.open_result = -1;
+    } else {
+      syscalls.fail_libevdev_create = true;
+    }
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    LinuxUhidBackend backend;
+    CreateKeyboardOptions options;
+    options.profile = profiles::keyboard();
+    options.profile.linux_phys = "hermes-kms-1";
+    return backend.create_keyboard(1, options).status;
+  }
+
   OperationStatus linux_backend_keyboard_fake_fallback_success() {
   #if defined(LIBVIRTUALHID_HAVE_XTEST)
     LinuxTestSyscalls syscalls;
@@ -2535,6 +2552,23 @@ namespace lvh::detail::test {
 
     CreateMouseOptions options;
     options.profile = profiles::mouse();
+    return backend.create_mouse(1, options).status;
+  }
+
+  OperationStatus linux_backend_mouse_isolated_fake_failure(bool fail_open) {
+    LinuxTestSyscalls syscalls;
+    enable_fake_device_syscalls(syscalls);
+    if (fail_open) {
+      syscalls.open_result = -1;
+    } else {
+      syscalls.fail_libevdev_create = true;
+    }
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    LinuxUhidBackend backend;
+    CreateMouseOptions options;
+    options.profile = profiles::mouse();
+    options.profile.linux_phys = "hermes-kms-2";
     return backend.create_mouse(1, options).status;
   }
 
