@@ -2837,13 +2837,22 @@ namespace lvh::detail {
 
         const auto normalized = reports::normalize_state(state);
         std::lock_guard lock {submit_mutex_};
+        frame_changes_.clear();
         if (const auto status = emit_button_state(normalized.buttons); !status.ok()) {
           return status;
         }
         if (const auto status = emit_axis_state(normalized); !status.ok()) {
           return status;
         }
-        return sync();
+        if (const auto status = sync(); !status.ok()) {
+          return status;
+        }
+        // Only cache a full, successful frame. Intermediate write failures
+        // must never be mistaken for events accepted by the kernel.
+        for (const auto &[key, value] : frame_changes_) {
+          emitted_values_.insert_or_assign(key, value);
+        }
+        return OperationStatus::success();
       }
 
       void set_output_callback(OutputCallback callback) override {
@@ -2866,13 +2875,25 @@ namespace lvh::detail {
       }
 
     private:
+      OperationStatus emit_state_event(std::uint16_t type, std::uint16_t code, std::int32_t value) {
+        const auto key = std::pair {type, code};
+        if (const auto it = emitted_values_.find(key); it != emitted_values_.end() && it->second == value) {
+          return OperationStatus::success();
+        }
+        if (const auto status = emit_event(type, code, value); !status.ok()) {
+          return status;
+        }
+        frame_changes_.insert_or_assign(key, value);
+        return OperationStatus::success();
+      }
+
       template<std::size_t Size>
       OperationStatus emit_button_map(
         const ButtonSet &buttons,
         const std::array<std::pair<GamepadButton, int>, Size> &button_map
       ) {
         for (const auto &[button, code] : button_map) {
-          if (const auto status = emit_event(EV_KEY, code, buttons.test(button) ? 1 : 0); !status.ok()) {
+          if (const auto status = emit_state_event(EV_KEY, code, buttons.test(button) ? 1 : 0); !status.ok()) {
             return status;
           }
         }
@@ -2914,7 +2935,7 @@ namespace lvh::detail {
           return status;
         }
         if (const auto misc1_button = uinput_misc1_button(profile_kind_); misc1_button.has_value()) {
-          if (const auto status = emit_event(EV_KEY, *misc1_button, buttons.test(misc1) ? 1 : 0); !status.ok()) {
+          if (const auto status = emit_state_event(EV_KEY, *misc1_button, buttons.test(misc1) ? 1 : 0); !status.ok()) {
             return status;
           }
         }
@@ -2925,10 +2946,10 @@ namespace lvh::detail {
       OperationStatus emit_axis_state(const GamepadState &state) {
         using enum GamepadButton;
 
-        if (const auto status = emit_event(EV_ABS, ABS_HAT0X, dpad_axis(state.buttons, dpad_left, dpad_right)); !status.ok()) {
+        if (const auto status = emit_state_event(EV_ABS, ABS_HAT0X, dpad_axis(state.buttons, dpad_left, dpad_right)); !status.ok()) {
           return status;
         }
-        if (const auto status = emit_event(EV_ABS, ABS_HAT0Y, dpad_axis(state.buttons, dpad_up, dpad_down)); !status.ok()) {
+        if (const auto status = emit_state_event(EV_ABS, ABS_HAT0Y, dpad_axis(state.buttons, dpad_up, dpad_down)); !status.ok()) {
           return status;
         }
 
@@ -2939,16 +2960,16 @@ namespace lvh::detail {
           std::pair {ABS_RY, static_cast<int>(reports::normalize_axis(-state.right_stick.y))},
         };
         for (const auto &[code, value] : stick_axes) {
-          if (const auto status = emit_event(EV_ABS, code, value); !status.ok()) {
+          if (const auto status = emit_state_event(EV_ABS, code, value); !status.ok()) {
             return status;
           }
         }
 
         if (profile_kind_ == GamepadProfileKind::switch_pro) {
-          if (const auto status = emit_event(EV_KEY, BTN_TL2, state.left_trigger > 0.0F ? 1 : 0); !status.ok()) {
+          if (const auto status = emit_state_event(EV_KEY, BTN_TL2, state.left_trigger > 0.0F ? 1 : 0); !status.ok()) {
             return status;
           }
-          return emit_event(EV_KEY, BTN_TR2, state.right_trigger > 0.0F ? 1 : 0);
+          return emit_state_event(EV_KEY, BTN_TR2, state.right_trigger > 0.0F ? 1 : 0);
         }
 
         const std::array trigger_axes {
@@ -2956,7 +2977,7 @@ namespace lvh::detail {
           std::pair {ABS_RZ, static_cast<int>(reports::normalize_trigger(state.right_trigger))},
         };
         for (const auto &[code, value] : trigger_axes) {
-          if (const auto status = emit_event(EV_ABS, code, value); !status.ok()) {
+          if (const auto status = emit_state_event(EV_ABS, code, value); !status.ok()) {
             return status;
           }
         }
@@ -3241,6 +3262,8 @@ namespace lvh::detail {
       GamepadProfileKind profile_kind_;
       std::atomic_bool running_ = false;
       std::mutex submit_mutex_;
+      std::map<std::pair<std::uint16_t, std::uint16_t>, std::int32_t> emitted_values_;
+      std::map<std::pair<std::uint16_t, std::uint16_t>, std::int32_t> frame_changes_;
       std::mutex callback_mutex_;
       OutputCallback output_callback_;
       std::map<int, UinputRumbleEffect> rumble_effects_;

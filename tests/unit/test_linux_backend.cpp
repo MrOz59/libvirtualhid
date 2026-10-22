@@ -544,6 +544,46 @@ TEST_F(LinuxBackendTest, PipeBackedUinputGamepadsUseCanonicalLinuxEvents) {
   }
 }
 
+TEST_F(LinuxBackendTest, UinputGamepadsOnlyEmitChangedButtonsAndAxes) {
+  for (const auto kind : {
+         lvh::GamepadProfileKind::generic,
+         lvh::GamepadProfileKind::xbox_360,
+         lvh::GamepadProfileKind::xbox_series,
+       }) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    const auto result = lvh::detail::test::linux_uinput_gamepad_delta_pipe(kind);
+    ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+    std::vector<int> changes_per_frame;
+    int frame_changes = 0;
+    int pressed = 0;
+    int released = 0;
+    for (const auto &event : result.events) {
+      if (event.type == EV_SYN && event.code == SYN_REPORT) {
+        changes_per_frame.push_back(frame_changes);
+        frame_changes = 0;
+      } else {
+        ++frame_changes;
+      }
+      if (event.type == EV_KEY && event.code == BTN_SOUTH) {
+        if (event.value == 1) {
+          ++pressed;
+        } else {
+          ++released;
+        }
+      }
+    }
+    ASSERT_EQ(changes_per_frame.size(), 5U);
+    EXPECT_GE(changes_per_frame[0], 10);
+    EXPECT_EQ(changes_per_frame[1], 0) << "identical neutral state";
+    EXPECT_EQ(changes_per_frame[2], 2) << "button press and left X axis";
+    EXPECT_EQ(changes_per_frame[3], 0) << "identical pressed state";
+    EXPECT_EQ(changes_per_frame[4], 2) << "button release and axis reset";
+    EXPECT_EQ(pressed, 1);
+    EXPECT_EQ(released, 2) << "first neutral frame and final release";
+  }
+}
+
 TEST_F(LinuxBackendTest, UinputGamepadsNormalizeForceFeedback) {
   using enum lvh::GamepadProfileKind;
 
