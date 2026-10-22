@@ -1104,7 +1104,7 @@ namespace lvh::detail {
       }
 
       bool is_open() const {
-        return open_;
+        return open_ && !write_failed_;
       }
 
       int file_descriptor() const {
@@ -1113,8 +1113,8 @@ namespace lvh::detail {
 
     private:
       OperationStatus emit_event_locked(std::uint16_t type, std::uint16_t code, std::int32_t value) {
-        if (fd_ < 0) {
-          return OperationStatus::failure(ErrorCode::device_closed, "uinput device is closed");
+        if (fd_ < 0 || !is_open()) {
+          return OperationStatus::failure(ErrorCode::device_closed, "uinput device is closed or its input stream failed");
         }
 
         input_event event {};
@@ -1123,11 +1123,20 @@ namespace lvh::detail {
         event.value = value;
 
         const auto event_buffer = std::as_bytes(std::span {&event, 1U});
-        const auto result = system_write(fd_, event_buffer);
+        std::ptrdiff_t result = -1;
+        do {
+          result = system_write(fd_, event_buffer);
+        } while (result < 0 && errno == EINTR);
+
         if (result < 0) {
-          return system_error_status(ErrorCode::backend_failure, "failed to write uinput event", errno);
+          // Earlier events may already have reached the kernel, so we cannot
+          // safely resume submitting events into a partially written frame.
+          const auto error = errno;
+          write_failed_ = true;
+          return system_error_status(ErrorCode::backend_failure, "failed to write uinput event", error);
         }
         if (static_cast<std::size_t>(result) != sizeof(event)) {
+          write_failed_ = true;
           return OperationStatus::failure(ErrorCode::backend_failure, "short write while sending uinput event");
         }
 
@@ -1137,6 +1146,7 @@ namespace lvh::detail {
       int fd_ = -1;
       libevdev_uinput *uinput_device_ = nullptr;
       std::atomic_bool open_ = true;
+      std::atomic_bool write_failed_ = false;
       std::mutex write_mutex_;
       std::string linux_phys_;
     };
