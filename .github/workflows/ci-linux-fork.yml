@@ -1,0 +1,130 @@
+---
+name: Linux build and tests (fork)
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-fork-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC 13
+            cc: gcc-13
+            cxx: g++-13
+          - compiler: Clang 18
+            cc: clang-18
+            cxx: clang++-18
+
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - name: Checkout including submodules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Linux build and test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang-18 \
+            cmake \
+            g++-13 \
+            gcc-13 \
+            libevdev-dev \
+            libinput-dev \
+            libsdl2-dev \
+            libx11-dev \
+            libxtst-dev \
+            ninja-build \
+            pkg-config
+
+          # Hosted runner kernels may keep uinput/uhid in a separate package.
+          extra_modules="linux-modules-extra-$(uname -r)"
+          if apt-cache show "${extra_modules}" >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends "${extra_modules}"
+          fi
+
+      - name: Enable kernel virtual input devices and udev permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo tee /etc/udev/rules.d/99-libvirtualhid-ci.rules >/dev/null <<'EOF'
+          SUBSYSTEM=="hidraw", KERNEL=="hidraw*", MODE="0666"
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="libvirtualhid*", MODE="0666"
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="(libvirtualhid)*", MODE="0666"
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{phys}=="hermes-kms-*", MODE="0666"
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{phys}=="libvirtualhid/uhid/*", MODE="0666"
+          EOF
+          sudo udevadm control --reload-rules
+
+          for module in uinput uhid; do
+            if ! sudo modprobe "${module}"; then
+              echo "::warning::Could not load ${module}; checking existing device node."
+            fi
+            if [[ ! -e "/dev/${module}" ]]; then
+              echo "::error::/dev/${module} is unavailable; full input integration tests cannot run."
+              exit 1
+            fi
+            sudo chmod a+rw "/dev/${module}"
+          done
+          if ! sudo modprobe hid_playstation; then
+            echo "::warning::hid_playstation unavailable; HIDAPI-dependent behavior may differ."
+          fi
+
+      - name: Configure Debug build with tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B cmake-build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_EXAMPLES=ON \
+            -DBUILD_TESTS=ON \
+            -DLIBVIRTUALHID_BUILD_TOOLS=OFF \
+            -DLIBVIRTUALHID_WARNINGS_AS_ERRORS=ON
+
+      - name: Compile library, examples, and tests
+        shell: bash
+        run: cmake --build cmake-build-ci --parallel 2
+
+      - name: Run complete GoogleTest suite (including uinput/UHID tests)
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          mkdir -p cmake-build-ci/reports
+          cd cmake-build-ci/tests
+          ./test_libvirtualhid \
+            --gtest_color=yes \
+            --gtest_output=xml:../reports/junit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: linux-${{ matrix.cc }}-test-results
+          path: cmake-build-ci/reports/junit.xml
+          if-no-files-found: warn
