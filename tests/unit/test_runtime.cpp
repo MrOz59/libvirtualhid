@@ -465,6 +465,7 @@ TEST(RuntimeTest, RejectsNonFinitePointerInputBeforeSubmission) {
   EXPECT_EQ(trackpad.trackpad->submit_count(), 0U);
 
   contact.contact_minor_axis = 0.0F;
+  contact.contact_major_axis = 0.0F;
   EXPECT_TRUE(touch.touchscreen->place_contact(contact).ok());
   EXPECT_TRUE(trackpad.trackpad->place_contact(contact).ok());
 
