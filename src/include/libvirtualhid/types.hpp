@@ -365,6 +365,16 @@ namespace lvh {
     std::string manufacturer;
 
     /**
+     * @brief Optional Linux physical identity for virtual input devices.
+     *
+     * On Linux, this is advertised as the device's phys value by uinput or
+     * UHID. Seat managers can use it to route devices to the correct seat.
+     * An empty value preserves the backend's existing physical identity.
+     * This is independent of the stable_id supplied at creation time.
+     */
+    std::string linux_phys;
+
+    /**
      * @brief Profile feature flags.
      */
     GamepadProfileCapabilities capabilities;
