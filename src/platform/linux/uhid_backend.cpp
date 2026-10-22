@@ -2254,16 +2254,39 @@ namespace lvh::detail {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput pen tablet is closed");
         }
 
+        // Release ends contact without ending hover proximity. Cancel and leave
+        // end proximity as well. Ignore coordinates, pressure and tilt from
+        // these events: the caller may not provide valid motion data for them.
+        if (state.transition != PointerTransition::update) {
+          if (const auto status = emit_event(EV_ABS, ABS_PRESSURE, 0); !status.ok()) {
+            return status;
+          }
+          if (const auto status = emit_event(EV_KEY, BTN_TOUCH, 0); !status.ok()) {
+            return status;
+          }
+          if (state.transition != PointerTransition::release) {
+            if (const auto status = emit_pen_tool(last_tool_, 0); !status.ok()) {
+              return status;
+            }
+            last_tool_ = PenToolType::unchanged;
+          }
+          return sync();
+        }
+
         if (const auto status = update_pen_tool(state.tool); !status.ok()) {
           return status;
         }
         if (const auto status = emit_pen_position(state); !status.ok()) {
           return status;
         }
-        if (const auto status = emit_pen_pressure(state.pressure); !status.ok()) {
-          return status;
-        }
-        if (const auto status = emit_pen_distance(state.distance); !status.ok()) {
+        // A nonnegative pressure indicates contact, even when its value is 0
+        // (pressure may be unknown). If both fields are provided, pressure
+        // takes precedence over hover distance to avoid releasing contact.
+        if (state.pressure >= 0.0F) {
+          if (const auto status = emit_pen_pressure(state.pressure); !status.ok()) {
+            return status;
+          }
+        } else if (const auto status = emit_pen_distance(state.distance); !status.ok()) {
           return status;
         }
         if (const auto status = emit_pen_tilt(state); !status.ok()) {
@@ -2330,7 +2353,7 @@ namespace lvh::detail {
         if (const auto status = emit_event(EV_ABS, ABS_DISTANCE, 0); !status.ok()) {
           return status;
         }
-        return emit_event(EV_KEY, BTN_TOUCH, pressure > 0.0F ? 1 : 0);
+        return emit_event(EV_KEY, BTN_TOUCH, 1);
       }
 
       OperationStatus emit_pen_distance(float distance) {

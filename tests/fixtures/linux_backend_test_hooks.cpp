@@ -1585,6 +1585,26 @@ namespace lvh::detail::test {
     return status;
   }
 
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_sequence_pipe(const std::vector<PenToolState> &states) {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    UinputPenTablet pen_tablet {descriptors[1]};
+    auto status = OperationStatus::success();
+    for (const auto &state : states) {
+      status = pen_tablet.place_tool(state);
+      if (!status.ok()) {
+        break;
+      }
+    }
+    static_cast<void>(pen_tablet.close());
+    auto records = read_input_events_until_eof(descriptors[0]);
+    static_cast<void>(::close(descriptors[0]));
+    return {std::move(status), std::move(records)};
+  }
+
   LinuxInputSubmissionResult linux_uinput_pen_tablet_transition_pipe() {
     std::array<int, 2> descriptors {-1, -1};
     if (::pipe(descriptors.data()) != 0) {
