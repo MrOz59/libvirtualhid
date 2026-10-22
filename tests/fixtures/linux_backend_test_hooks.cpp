@@ -1273,34 +1273,38 @@ namespace lvh::detail::test {
     };
 
     switch (device_type) {
-      case DeviceType::keyboard: {
-        UinputKeyboard keyboard {fake_fd};
-        record_submissions(keyboard, [](auto &device) {
-          return device.submit({.key_code = 0x41, .pressed = true});
-        });
-        break;
-      }
-      case DeviceType::touchscreen: {
-        UinputTouchscreen touchscreen {fake_fd};
-        record_submissions(touchscreen, [](auto &device) {
-          return device.place_contact({.id = 1, .x = 0.5F, .y = 0.5F, .pressure = 0.5F});
-        });
-        break;
-      }
-      case DeviceType::pen_tablet: {
-        UinputPenTablet pen {fake_fd};
-        record_submissions(pen, [](auto &device) {
-          return device.place_tool({.tool = PenToolType::pen, .x = 0.5F, .pressure = 0.5F});
-        });
-        break;
-      }
-      case DeviceType::gamepad: {
-        UinputGamepad gamepad {fake_fd, GamepadProfileKind::xbox_360};
-        record_submissions(gamepad, [](auto &device) {
-          return device.submit({}, {});
-        });
-        break;
-      }
+      case DeviceType::keyboard:
+        {
+          UinputKeyboard keyboard {fake_fd};
+          record_submissions(keyboard, [](auto &device) {
+            return device.submit({.key_code = 0x41, .pressed = true});
+          });
+          break;
+        }
+      case DeviceType::touchscreen:
+        {
+          UinputTouchscreen touchscreen {fake_fd};
+          record_submissions(touchscreen, [](auto &device) {
+            return device.place_contact({.id = 1, .x = 0.5F, .y = 0.5F, .pressure = 0.5F});
+          });
+          break;
+        }
+      case DeviceType::pen_tablet:
+        {
+          UinputPenTablet pen {fake_fd};
+          record_submissions(pen, [](auto &device) {
+            return device.place_tool({.tool = PenToolType::pen, .x = 0.5F, .pressure = 0.5F});
+          });
+          break;
+        }
+      case DeviceType::gamepad:
+        {
+          UinputGamepad gamepad {fake_fd, GamepadProfileKind::xbox_360};
+          record_submissions(gamepad, [](auto &device) {
+            return device.submit({}, {});
+          });
+          break;
+        }
       default:
         observation.first_submit = OperationStatus::failure(ErrorCode::invalid_argument, "unsupported device kind");
         break;
