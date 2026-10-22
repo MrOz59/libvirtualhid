@@ -896,6 +896,20 @@ namespace lvh::detail {
       return scale_normalized_axis(mapped, maximum);
     }
 
+    int scale_touch_size(
+      float size_in_pixels,
+      const PointerViewport &viewport,
+      const PointerViewport &desktop
+    ) {
+      // Contact sizes are expressed in target viewport pixels. Emit a zero
+      // (unknown size) when the client does not provide pixel geometry.
+      if (viewport.width <= 0 || size_in_pixels <= 0.0F) {
+        return 0;
+      }
+      const auto desktop_width = desktop.width > 0 ? desktop.width : viewport.width;
+      return scale_normalized_axis(size_in_pixels / static_cast<float>(desktop_width), touch_axis_max_x);
+    }
+
     int clamp_degrees(std::int32_t value) {
       return std::clamp(value, -90, 90);
     }
@@ -1339,6 +1353,13 @@ namespace lvh::detail {
       }
       auto orientation = make_absinfo(-90, 90);
       if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_ORIENTATION, "touch absolute axis", &orientation); !status.ok()) {
+        return status;
+      }
+      auto touch_size = make_absinfo(0, touch_axis_max_x);
+      if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_TOUCH_MAJOR, "touch major axis", &touch_size); !status.ok()) {
+        return status;
+      }
+      if (const auto status = enable_evdev_code(device, EV_ABS, ABS_MT_TOUCH_MINOR, "touch minor axis", &touch_size); !status.ok()) {
         return status;
       }
 
@@ -2077,6 +2098,14 @@ namespace lvh::detail {
           return status;
         }
         if (const auto status = emit_event(EV_ABS, ABS_MT_PRESSURE, pressure); !status.ok()) {
+          return status;
+        }
+        const auto major = scale_touch_size(contact.contact_major_axis, contact.viewport, desktop_);
+        const auto minor = scale_touch_size(contact.contact_minor_axis, contact.viewport, desktop_);
+        if (const auto status = emit_event(EV_ABS, ABS_MT_TOUCH_MAJOR, major); !status.ok()) {
+          return status;
+        }
+        if (const auto status = emit_event(EV_ABS, ABS_MT_TOUCH_MINOR, minor); !status.ok()) {
           return status;
         }
         if (const auto status = emit_event(EV_ABS, ABS_MT_ORIENTATION, clamp_degrees(contact.orientation)); !status.ok()) {

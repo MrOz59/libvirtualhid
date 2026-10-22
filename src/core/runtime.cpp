@@ -451,6 +451,9 @@ namespace lvh {
       ) {
         return OperationStatus::failure(ErrorCode::invalid_argument, "touch contact values must be finite");
       }
+      if (contact.contact_major_axis < 0.0F || contact.contact_minor_axis < 0.0F) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "touch contact sizes must not be negative");
+      }
 
       return OperationStatus::success();
     }

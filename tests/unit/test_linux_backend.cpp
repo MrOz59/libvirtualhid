@@ -1000,6 +1000,47 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   EXPECT_TRUE(saw_stylus);
 }
 
+TEST_F(LinuxBackendTest, TouchContactSizesUseViewportPixelsAndClearUnknownSizes) {
+  const lvh::PointerViewport target {.offset_x = 1920, .width = 1920, .height = 1080};
+  const lvh::PointerViewport desktop {.width = 3840, .height = 1080};
+  const lvh::TouchContact contact {
+    .id = 1,
+    .x = 0.5F,
+    .y = 0.5F,
+    .pressure = 0.5F,
+    .viewport = target,
+    .contact_major_axis = 96.0F,
+    .contact_minor_axis = 48.0F,
+  };
+
+  const auto axis_value = [](const auto &events, int code) -> std::optional<int> {
+    const auto it = std::ranges::find_if(events, [code](const auto &event) {
+      return event.type == EV_ABS && event.code == code;
+    });
+    if (it == events.end()) {
+      return std::nullopt;
+    }
+    return it->value;
+  };
+
+  const auto touch = lvh::detail::test::linux_uinput_touchscreen_viewport_pipe(contact, desktop);
+  ASSERT_TRUE(touch.status.ok()) << touch.status.message();
+  EXPECT_EQ(axis_value(touch.events, ABS_MT_TOUCH_MAJOR), 480);
+  EXPECT_EQ(axis_value(touch.events, ABS_MT_TOUCH_MINOR), 240);
+
+  const auto trackpad = lvh::detail::test::linux_uinput_trackpad_contact_pipe(contact);
+  ASSERT_TRUE(trackpad.status.ok()) << trackpad.status.message();
+  EXPECT_EQ(axis_value(trackpad.events, ABS_MT_TOUCH_MAJOR), 960);
+  EXPECT_EQ(axis_value(trackpad.events, ABS_MT_TOUCH_MINOR), 480);
+
+  auto unknown = contact;
+  unknown.viewport = {};
+  const auto no_geometry = lvh::detail::test::linux_uinput_touchscreen_contact_pipe(unknown);
+  ASSERT_TRUE(no_geometry.status.ok()) << no_geometry.status.message();
+  EXPECT_EQ(axis_value(no_geometry.events, ABS_MT_TOUCH_MAJOR), 0);
+  EXPECT_EQ(axis_value(no_geometry.events, ABS_MT_TOUCH_MINOR), 0);
+}
+
 TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
   for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
     const auto result = lvh::detail::test::linux_uinput_touch_primary_pointer_pipe(kind);
