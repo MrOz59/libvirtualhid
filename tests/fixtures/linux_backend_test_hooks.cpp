@@ -1000,6 +1000,36 @@ namespace lvh::detail::test {
       return {std::move(status), std::move(records)};
     }
 
+    template<typename TouchDevice>
+    LinuxInputSubmissionResult touch_primary_pointer_pipe() {
+      std::array<int, 2> descriptors {-1, -1};
+      if (::pipe(descriptors.data()) != 0) {
+        return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+      }
+
+      TouchDevice device {descriptors[1]};
+      auto status = device.place_contact({.id = 5, .x = 0.2F, .y = 0.2F, .pressure = 0.2F});
+      if (status.ok()) {
+        status = device.place_contact({.id = 1, .x = 0.8F, .y = 0.8F, .pressure = 0.8F});
+      }
+      if (status.ok()) {
+        status = device.place_contact({.id = 1, .x = 0.9F, .y = 0.9F, .pressure = 0.9F});
+      }
+      if (status.ok()) {
+        status = device.release_contact(5, PointerTransition::release);
+      }
+      if (status.ok()) {
+        status = device.place_contact({.id = 1, .x = 0.7F, .y = 0.7F, .pressure = 0.7F});
+      }
+      if (status.ok()) {
+        status = device.release_contact(1, PointerTransition::release);
+      }
+      static_cast<void>(device.close());
+      auto records = read_input_events_until_eof(descriptors[0]);
+      static_cast<void>(::close(descriptors[0]));
+      return {std::move(status), std::move(records)};
+    }
+
   }  // namespace
 
   std::string linux_copy_string_char_buffer(const std::string &source) {
@@ -1557,6 +1587,17 @@ namespace lvh::detail::test {
           OperationStatus::failure(ErrorCode::invalid_argument, "device type must be touchscreen or trackpad"),
           {},
         };
+    }
+  }
+
+  LinuxInputSubmissionResult linux_uinput_touch_primary_pointer_pipe(DeviceType device_type) {
+    switch (device_type) {
+      case DeviceType::touchscreen:
+        return touch_primary_pointer_pipe<UinputTouchscreen>();
+      case DeviceType::trackpad:
+        return touch_primary_pointer_pipe<UinputTrackpad>();
+      default:
+        return {OperationStatus::failure(ErrorCode::invalid_argument, "unsupported touch device type"), {}};
     }
   }
 

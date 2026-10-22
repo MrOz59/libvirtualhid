@@ -6,6 +6,7 @@
 // standard includes
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -893,8 +894,9 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   EXPECT_EQ(result.events[2].value, 1);
   EXPECT_EQ(result.events[3].type, EV_ABS);
   EXPECT_EQ(result.events[3].code, ABS_X);
-  EXPECT_EQ(result.events[4].type, EV_ABS);
-  EXPECT_EQ(result.events[4].code, ABS_MT_POSITION_X);
+  EXPECT_TRUE(std::ranges::any_of(result.events, [](const auto &event) {
+    return event.type == EV_ABS && event.code == ABS_MT_POSITION_X;
+  }));
 
   result = lvh::detail::test::linux_uinput_trackpad_contact_pipe(contact);
   ASSERT_TRUE(result.status.ok()) << result.status.message();
@@ -930,6 +932,40 @@ TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesEmitEvents) {
   EXPECT_TRUE(saw_pen_tool);
   EXPECT_TRUE(saw_pressure);
   EXPECT_TRUE(saw_stylus);
+}
+
+TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
+  for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
+    const auto result = lvh::detail::test::linux_uinput_touch_primary_pointer_pipe(kind);
+    ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+    std::vector<int> primary_x;
+    std::vector<int> primary_pressure;
+    std::vector<int> slot_x;
+    for (const auto &event : result.events) {
+      if (event.type != EV_ABS) {
+        continue;
+      }
+      if (event.code == ABS_X) {
+        primary_x.push_back(event.value);
+      } else if (event.code == ABS_PRESSURE) {
+        primary_pressure.push_back(event.value);
+      } else if (event.code == ABS_MT_POSITION_X) {
+        slot_x.push_back(event.value);
+      }
+    }
+    const auto x = [](float fraction) {
+      return static_cast<int>(std::lround(fraction * 19200.0F));
+    };
+    const auto pressure = [](float fraction) {
+      return static_cast<int>(std::lround(fraction * 253.0F));
+    };
+    // Secondary updates change the MT slot, not the legacy primary axes.
+    // Removing the primary promotes the last known secondary position.
+    EXPECT_EQ(primary_x, (std::vector<int> {x(0.2F), x(0.9F), x(0.7F)}));
+    EXPECT_EQ(primary_pressure, (std::vector<int> {pressure(0.2F), pressure(0.9F), pressure(0.7F)}));
+    EXPECT_EQ(slot_x, (std::vector<int> {x(0.2F), x(0.8F), x(0.9F), x(0.7F)}));
+  }
 }
 
 TEST_F(LinuxBackendTest, PipeBackedUinputTouchDevicesCoverStateTransitions) {
