@@ -1090,6 +1090,14 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_touch_primary_pointer_pipe(DeviceType device_type);
 
   /**
+   * @brief Exercise hover/contact/release transitions with overlapping fingers.
+   *
+   * @param device_type Touchscreen or trackpad.
+   * @return Captured evdev events from a sequence of synthetic touch inputs.
+   */
+  LinuxInputSubmissionResult linux_uinput_touch_hover_sequence_pipe(DeviceType device_type);
+
+  /**
    * @brief Submit invalid touchscreen contacts through pipe-backed devices.
    *
    * @return Final invalid-contact status.
