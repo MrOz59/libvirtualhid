@@ -975,6 +975,19 @@ TEST_F(LinuxBackendTest, SocketpairBackedUhidGamepadRoundTripsEvents) {
   EXPECT_EQ(result.output.last.high_frequency_rumble, 0x1234);
 }
 
+TEST_F(LinuxBackendTest, UhidGamepadAllowsExplicitPhysicalPathWithoutChangingStableIdentity) {
+  const auto original = lvh::detail::test::linux_uhid_socketpair_roundtrip();
+  ASSERT_TRUE(original.create_status.ok()) << original.create_status.message();
+  EXPECT_TRUE(original.creation.saw_create);
+  EXPECT_TRUE(original.creation.physical_id.starts_with("libvirtualhid/uhid/"));
+
+  const auto isolated = lvh::detail::test::linux_uhid_socketpair_roundtrip("hermes-kms-2");
+  ASSERT_TRUE(isolated.create_status.ok()) << isolated.create_status.message();
+  EXPECT_TRUE(isolated.creation.saw_create);
+  EXPECT_EQ(isolated.creation.physical_id, "hermes-kms-2");
+  EXPECT_EQ(isolated.creation.unique_id, original.creation.unique_id);
+}
+
 TEST_F(LinuxBackendTest, XboxOneAndSeriesPreferBluetoothUhidWithUinputFallback) {
   using enum lvh::GamepadProfileKind;
 
