@@ -2955,6 +2955,19 @@ namespace lvh::detail::test {
     return gamepad.submit({}, {0});
   }
 
+  std::pair<OperationStatus, int> linux_uhid_submit_fake_interrupted_write() {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.interrupt_write_call = 1;
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    UhidGamepad gamepad {fake_fd};
+    const auto status = gamepad.submit({}, {0});
+    const auto calls = syscalls.write_call_count.load();
+    static_cast<void>(gamepad.close());
+    return {status, calls};
+  }
+
   OperationStatus linux_uhid_close_fake_write_failure() {
     LinuxTestSyscalls syscalls;
     syscalls.override_write = true;
@@ -3011,6 +3024,19 @@ namespace lvh::detail::test {
     syscalls.read_results = {-1};
     syscalls.read_errors = {EIO};
     return run_fake_uhid_read_loop(syscalls, 1);
+  }
+
+  std::pair<OperationStatus, int> linux_uhid_read_loop_fake_short_read() {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_poll = true;
+    syscalls.poll_results = {1};
+    syscalls.poll_revents = {POLLIN};
+    syscalls.override_read = true;
+    syscalls.read_results = {static_cast<std::ptrdiff_t>(sizeof(uhid_event) - 1)};
+    syscalls.read_event.type = UHID_GET_REPORT;
+
+    const auto status = run_fake_uhid_read_loop(syscalls, 1);
+    return {status, syscalls.write_call_count.load()};
   }
 
   OperationStatus linux_uhid_read_loop_fake_output_without_callback() {
