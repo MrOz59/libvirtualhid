@@ -783,12 +783,14 @@ namespace lvh::detail::test {
    * @param name Device name to discover.
    * @param input_root Test input sysfs root.
    * @param hidraw_root Test hidraw sysfs root.
+   * @param linux_phys Optional expected Linux physical identity.
    * @return Matching device nodes.
    */
   std::vector<DeviceNode> linux_discover_nodes_by_name(
     const std::string &name,
     const std::string &input_root,
-    const std::string &hidraw_root
+    const std::string &hidraw_root,
+    std::string_view linux_phys = {}
   );
 
   /**
