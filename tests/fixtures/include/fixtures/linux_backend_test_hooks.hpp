@@ -992,6 +992,18 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_touchscreen_contact_pipe(const TouchContact &contact);
 
   /**
+   * @brief Submit one contact using explicit virtual desktop bounds.
+   *
+   * @param contact Touch contact with per-event target viewport.
+   * @param desktop Complete virtual desktop bounds.
+   * @return Captured Linux input events.
+   */
+  LinuxInputSubmissionResult linux_uinput_touchscreen_viewport_pipe(
+    const TouchContact &contact,
+    PointerViewport desktop
+  );
+
+  /**
    * @brief Place, click, and release a contact through a pipe-backed uinput trackpad.
    *
    * @param contact Touch contact to place.
@@ -1006,6 +1018,18 @@ namespace lvh::detail::test {
    * @return Submission status and captured input events.
    */
   LinuxInputSubmissionResult linux_uinput_pen_tablet_tool_pipe(const PenToolState &state);
+
+  /**
+   * @brief Submit one pen tool state using desktop/viewport mapping.
+   *
+   * @param state Pen position with its target viewport.
+   * @param desktop Complete virtual desktop bounds.
+   * @return Captured Linux input events.
+   */
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_viewport_pipe(
+    const PenToolState &state,
+    PointerViewport desktop
+  );
 
   /**
    * @brief Submit multiple contacts through a pipe-backed uinput trackpad.
