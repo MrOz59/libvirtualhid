@@ -16,8 +16,11 @@ env:
   PYTHON_VERSION: '3.14'
 
 jobs:
+  # The fork uses ci-linux-fork.yml; the upstream release pipeline also builds
+  # and signs Windows/macOS drivers, which require LizardByte credentials.
   setup_release:
     name: Setup Release
+    if: github.repository == 'LizardByte/libvirtualhid'
     outputs:
       python_version: ${{ steps.ci_versions.outputs.python_version }}
       publish_release: ${{ steps.setup_release.outputs.publish_release }}
@@ -98,6 +101,7 @@ jobs:
 
   powershell:
     name: PowerShell
+    if: github.repository == 'LizardByte/libvirtualhid'
     permissions:
       contents: read
     uses: ./.github/workflows/ci-powershell.yml
