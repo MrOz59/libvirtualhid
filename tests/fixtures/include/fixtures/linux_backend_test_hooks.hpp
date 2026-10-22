@@ -1044,9 +1044,10 @@ namespace lvh::detail::test {
   /**
    * @brief Exercise a UHID gamepad lifecycle over a socketpair.
    *
+   * @param linux_phys Optional physical path advertised to the Linux kernel.
    * @return Round-trip result.
    */
-  LinuxUhidRoundTripResult linux_uhid_socketpair_roundtrip();
+  LinuxUhidRoundTripResult linux_uhid_socketpair_roundtrip(std::string_view linux_phys = {});
 
   /**
    * @brief Exercise an Xbox profile's Bluetooth input and four-motor output through a socketpair.
