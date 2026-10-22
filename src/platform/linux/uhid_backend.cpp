@@ -2160,15 +2160,13 @@ namespace lvh::detail {
           return status;
         }
         const auto was_primary = primary_contact_id_ == contact_id;
-        contacts_.erase(slot_it);
-        latest_contacts_.erase(contact_id);
         if (const auto status = emit_event(EV_ABS, ABS_MT_TRACKING_ID, -1); !status.ok()) {
           return status;
         }
 
         auto next_primary = primary_contact_id_;
         if (was_primary) {
-          next_primary = oldest_touching_contact(std::nullopt);
+          next_primary = oldest_touching_contact(contact_id);
           if (next_primary.has_value()) {
             const auto next = latest_contacts_.find(*next_primary);
             if (next != latest_contacts_.end()) {
@@ -2183,7 +2181,7 @@ namespace lvh::detail {
           }
         }
 
-        const auto touching_after = touching_count(std::nullopt, false);
+        const auto touching_after = touching_count(contact_id, false);
         if (update_trackpad_buttons) {
           if (const auto status = emit_trackpad_tool_buttons(touching_after); !status.ok()) {
             return status;
@@ -2197,6 +2195,8 @@ namespace lvh::detail {
         if (const auto status = sync(); !status.ok()) {
           return status;
         }
+        contacts_.erase(contact_id);
+        latest_contacts_.erase(contact_id);
         primary_contact_id_ = next_primary;
         return OperationStatus::success();
       }

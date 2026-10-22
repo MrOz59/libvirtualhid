@@ -933,6 +933,15 @@ TEST_F(LinuxBackendTest, UinputStopsAcceptingEventsAfterIrrecoverableWrites) {
   }
 }
 
+TEST_F(LinuxBackendTest, TouchReleaseFailureClosesStreamRatherThanPretendingSuccess) {
+  for (const auto type : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
+    SCOPED_TRACE(static_cast<int>(type));
+    const auto [first, second] = lvh::detail::test::linux_uinput_touch_release_write_failure(type);
+    EXPECT_EQ(first.code(), lvh::ErrorCode::backend_failure);
+    EXPECT_EQ(second.code(), lvh::ErrorCode::device_closed);
+  }
+}
+
 TEST_F(LinuxBackendTest, UinputRetriesInterruptedWritesWithoutClosingDevice) {
   const auto [status, calls] = lvh::detail::test::linux_uinput_interrupted_write_retry();
   EXPECT_TRUE(status.ok()) << status.message();
