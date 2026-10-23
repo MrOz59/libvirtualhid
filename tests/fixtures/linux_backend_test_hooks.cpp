@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -124,6 +125,11 @@ namespace lvh::detail::test {
       std::atomic_int write_call_count = 0;
       int fail_write_call = -1;
       int interrupt_write_call = -1;
+      int block_write_call = -1;
+      std::mutex write_gate_mutex;
+      std::condition_variable write_gate_cv;
+      bool write_gate_entered = false;
+      bool allow_blocked_write = false;
       int short_write_call = -1;
       std::size_t short_write_size = 1;
       bool capture_input_events = false;
@@ -230,6 +236,15 @@ int lvh_linux_test_open(const char *path, int flags) {
 std::ptrdiff_t lvh_linux_test_write(int fd, const std::byte *buffer, std::size_t size) {
   if (lvh::detail::test::active_test_syscalls() != nullptr && lvh::detail::test::active_test_syscalls()->override_write) {
     const auto call_count = ++lvh::detail::test::active_test_syscalls()->write_call_count;
+    auto &syscalls = *lvh::detail::test::active_test_syscalls();
+    if (syscalls.block_write_call == call_count) {
+      std::unique_lock lock {syscalls.write_gate_mutex};
+      syscalls.write_gate_entered = true;
+      syscalls.write_gate_cv.notify_all();
+      syscalls.write_gate_cv.wait(lock, [&syscalls]() {
+        return syscalls.allow_blocked_write;
+      });
+    }
     if (lvh::detail::test::active_test_syscalls()->fail_write_call == call_count) {
       errno = EIO;
       return -1;
