@@ -1831,6 +1831,9 @@ namespace lvh::detail {
       }
 
       OperationStatus submit(const MouseEvent &event) override {
+        // Mouse submissions update shared scroll, button and motion-device
+        // state and must not interleave individual EV_* events between frames.
+        std::lock_guard lock {submit_mutex_};
         if (!relative_device_.open() || !absolute_device_.open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput mouse is closed");
         }
@@ -1854,6 +1857,7 @@ namespace lvh::detail {
       }
 
       OperationStatus close() override {
+        std::lock_guard lock {submit_mutex_};
         const auto relative_status = relative_device_.close("relative uinput mouse");
         const auto absolute_status = absolute_device_.close("absolute uinput mouse");
         return relative_status.ok() ? absolute_status : relative_status;
@@ -1876,6 +1880,7 @@ namespace lvh::detail {
       std::byte absolute_buttons_down_ {};
       std::int32_t vertical_scroll_remainder_ = 0;
       std::int32_t horizontal_scroll_remainder_ = 0;
+      std::mutex submit_mutex_;
 
       UinputMouseDevice &device(UinputMouseDeviceKind kind) {
         return kind == UinputMouseDeviceKind::absolute ? absolute_device_ : relative_device_;
