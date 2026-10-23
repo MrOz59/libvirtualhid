@@ -650,6 +650,34 @@ namespace lvh::detail {
       return discover_input_nodes_by_name(name, "/sys/class/input", "/sys/class/hidraw", linux_phys);
     }
 
+#if defined(__linux__)
+    std::vector<DeviceNode> discover_uhid_gamepad_nodes(
+      const std::string &name,
+      std::string_view physical_id,
+      std::string_view unique_id,
+      bool require_physical_id,
+      const std::filesystem::path &input_root = "/sys/class/input",
+      const std::filesystem::path &hidraw_root = "/sys/class/hidraw"
+    ) {
+      auto nodes = discover_input_nodes_by_name(
+        name,
+        input_root,
+        hidraw_root,
+        require_physical_id ? physical_id : std::string_view {}
+      );
+      for (const auto &node : discover_hidraw_nodes_by_metadata(
+             name,
+             physical_id,
+             unique_id,
+             hidraw_root,
+             require_physical_id
+           )) {
+        append_node_if_missing(nodes, node.kind, node.path);
+      }
+      return nodes;
+    }
+#endif
+
     OperationStatus ioctl_status(const std::string &operation) {
       return system_error_status(ErrorCode::backend_failure, operation, errno);
     }
@@ -3488,18 +3516,7 @@ namespace lvh::detail {
       }
 
       std::vector<DeviceNode> device_nodes() const override {
-        const auto isolated = !profile_.linux_phys.empty();
-        auto nodes = discover_input_nodes_by_name(device_name_, isolated ? std::string_view {physical_id_} : std::string_view {});
-        for (const auto &node : discover_hidraw_nodes_by_metadata(
-               device_name_,
-               physical_id_,
-               unique_id_,
-               "/sys/class/hidraw",
-               isolated
-             )) {
-          append_node_if_missing(nodes, node.kind, node.path);
-        }
-        return nodes;
+        return discover_uhid_gamepad_nodes(device_name_, physical_id_, unique_id_, !profile_.linux_phys.empty());
       }
 
       /**
