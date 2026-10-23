@@ -2002,6 +2002,50 @@ namespace lvh::detail::test {
     return {std::move(status), std::move(records)};
   }
 
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_parallel_updates_pipe() {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    UinputPenTablet pen_tablet {descriptors[1]};
+    std::vector<LinuxInputEventRecord> captured;
+    std::jthread reader {[&]() {
+      captured = read_input_events_until_eof(descriptors[0]);
+    }};
+
+    constexpr int repetitions = 80;
+    std::atomic_bool start = false;
+    OperationStatus first_status;
+    OperationStatus second_status;
+    const auto send = [&](float x, float y, OperationStatus &status) {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int index = 0; index < repetitions; ++index) {
+        status = pen_tablet.place_tool({.tool = PenToolType::pen, .x = x, .y = y, .pressure = 0.5F});
+        if (!status.ok()) {
+          return;
+        }
+      }
+    };
+    std::jthread first {[&]() {
+      send(0.2F, 0.4F, first_status);
+    }};
+    std::jthread second {[&]() {
+      send(0.7F, 0.9F, second_status);
+    }};
+    start.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+    static_cast<void>(pen_tablet.close());
+    reader.join();
+
+    static_cast<void>(::close(descriptors[0]));
+    const auto status = first_status.ok() ? second_status : first_status;
+    return {status, std::move(captured)};
+  }
+
   LinuxInputSubmissionResult linux_uinput_pen_tablet_transition_pipe() {
     std::array<int, 2> descriptors {-1, -1};
     if (::pipe(descriptors.data()) != 0) {
