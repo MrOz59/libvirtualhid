@@ -913,6 +913,15 @@ TEST_F(LinuxBackendTest, PipeBackedUinputMouseAccumulatesLegacyScrollDetentsPerA
   );
 }
 
+TEST_F(LinuxBackendTest, UinputCloseWaitsForAnInFlightEventWrite) {
+  const auto result = lvh::detail::test::linux_uinput_close_during_write();
+  ASSERT_TRUE(result.write_started) << "synthetic write did not reach its synchronization gate";
+  EXPECT_FALSE(result.close_completed_while_write_blocked) << "close must not tear down an active write";
+  EXPECT_TRUE(result.close_status.ok()) << result.close_status.message();
+  EXPECT_EQ(result.after_close_status.code(), lvh::ErrorCode::device_closed);
+  EXPECT_TRUE(result.submit_status.ok() || result.submit_status.code() == lvh::ErrorCode::device_closed);
+}
+
 TEST_F(LinuxBackendTest, UinputStopsAcceptingEventsAfterIrrecoverableWrites) {
   for (const auto type : {
          lvh::DeviceType::keyboard,
