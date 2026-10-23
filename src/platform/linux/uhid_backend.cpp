@@ -1096,6 +1096,9 @@ namespace lvh::detail {
       }
 
       OperationStatus close_uinput(const std::string &description) {
+        // Writers hold the same mutex while using fd_. Wait for any in-flight
+        // write before destroying or closing the underlying device.
+        std::lock_guard lock {write_mutex_};
         if (!open_.exchange(false)) {
           return OperationStatus::success();
         }
