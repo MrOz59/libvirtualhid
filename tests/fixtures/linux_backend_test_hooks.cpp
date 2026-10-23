@@ -1361,6 +1361,70 @@ namespace lvh::detail::test {
     return observation;
   }
 
+  LinuxUinputCloseRaceObservation linux_uinput_close_during_write() {
+    LinuxUinputCloseRaceObservation result;
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.override_ioctl = true;
+    syscalls.block_write_call = 1;
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    const auto fd = open_test_fd();
+    if (fd < 0) {
+      result.submit_status = system_error_status(ErrorCode::backend_failure, "failed to open test descriptor", errno);
+      result.close_status = result.submit_status;
+      result.after_close_status = result.submit_status;
+      return result;
+    }
+
+    UinputKeyboard keyboard {fd};
+    std::jthread sender {[&]() {
+      result.submit_status = keyboard.submit({.key_code = 0x41, .pressed = true});
+    }};
+
+    {
+      std::unique_lock lock {syscalls.write_gate_mutex};
+      result.write_started = syscalls.write_gate_cv.wait_for(lock, std::chrono::seconds {2}, [&]() {
+        return syscalls.write_gate_entered;
+      });
+    }
+
+    if (result.write_started) {
+      std::atomic_bool close_started = false;
+      std::atomic_bool close_completed = false;
+      std::jthread closer {[&]() {
+        close_started = true;
+        result.close_status = keyboard.close();
+        close_completed = true;
+      }};
+      while (!close_started) {
+        std::this_thread::yield();
+      }
+      // The blocked write still owns the write mutex. A concurrent close
+      // must not finish until the gate lets the write return.
+      std::this_thread::sleep_for(std::chrono::milliseconds {30});
+      result.close_completed_while_write_blocked = close_completed;
+      {
+        std::lock_guard lock {syscalls.write_gate_mutex};
+        syscalls.allow_blocked_write = true;
+      }
+      syscalls.write_gate_cv.notify_all();
+      sender.join();
+      closer.join();
+    } else {
+      {
+        std::lock_guard lock {syscalls.write_gate_mutex};
+        syscalls.allow_blocked_write = true;
+      }
+      syscalls.write_gate_cv.notify_all();
+      sender.join();
+      result.close_status = keyboard.close();
+    }
+
+    result.after_close_status = keyboard.submit({.key_code = 0x41, .pressed = true});
+    return result;
+  }
+
   std::pair<OperationStatus, OperationStatus> linux_uinput_touch_release_write_failure(DeviceType device_type) {
     LinuxTestSyscalls syscalls;
     syscalls.override_write = true;
