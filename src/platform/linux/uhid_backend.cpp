@@ -1096,6 +1096,9 @@ namespace lvh::detail {
       }
 
       OperationStatus close_uinput(const std::string &description) {
+        // Serialize descriptor destruction with event writes. Otherwise a
+        // concurrent submit may write to a closed (or reused) descriptor.
+        std::lock_guard lock {write_mutex_};
         if (!open_.exchange(false)) {
           return OperationStatus::success();
         }
