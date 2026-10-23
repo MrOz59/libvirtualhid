@@ -887,6 +887,28 @@ TEST_F(LinuxBackendTest, PipeBackedUinputMouseScrollsOnLastMotionDevice) {
 #endif
 }
 
+TEST_F(LinuxBackendTest, ConcurrentUinputMouseMotionFramesDoNotInterleave) {
+  const auto result = lvh::detail::test::linux_uinput_mouse_parallel_motion_pipe();
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+  EXPECT_TRUE(result.absolute_events.empty());
+
+  constexpr auto repetitions = 100;
+  ASSERT_EQ(result.relative_events.size(), 2U * repetitions * 3U);
+  for (std::size_t index = 0; index < result.relative_events.size(); index += 3) {
+    const auto &x = result.relative_events[index];
+    const auto &y = result.relative_events[index + 1];
+    const auto &sync = result.relative_events[index + 2];
+    EXPECT_EQ(x.type, EV_REL);
+    EXPECT_EQ(x.code, REL_X);
+    ASSERT_TRUE(x.value == 1 || x.value == 2);
+    EXPECT_EQ(y.type, EV_REL);
+    EXPECT_EQ(y.code, REL_Y);
+    EXPECT_EQ(y.value, x.value + 100);
+    EXPECT_EQ(sync.type, EV_SYN);
+    EXPECT_EQ(sync.code, SYN_REPORT);
+  }
+}
+
 TEST_F(LinuxBackendTest, PipeBackedUinputMouseAccumulatesLegacyScrollDetentsPerAxis) {
   const std::vector<lvh::MouseEvent> events {
     {.kind = lvh::MouseEventKind::vertical_scroll, .high_resolution_scroll = 60},
