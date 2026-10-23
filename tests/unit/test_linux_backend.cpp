@@ -942,6 +942,15 @@ TEST_F(LinuxBackendTest, TouchReleaseFailureClosesStreamRatherThanPretendingSucc
   }
 }
 
+TEST_F(LinuxBackendTest, UinputCloseWaitsForInFlightWrite) {
+  const auto observation = lvh::detail::test::linux_uinput_close_during_pending_write();
+  EXPECT_FALSE(observation.close_during_write) << "device destruction must wait for the event writer";
+  EXPECT_TRUE(observation.close_status.ok()) << observation.close_status.message();
+  EXPECT_TRUE(
+    observation.submit_status.ok() || observation.submit_status.code() == lvh::ErrorCode::device_closed
+  ) << observation.submit_status.message();
+}
+
 TEST_F(LinuxBackendTest, UinputRetriesInterruptedWritesWithoutClosingDevice) {
   const auto [status, calls] = lvh::detail::test::linux_uinput_interrupted_write_retry();
   EXPECT_TRUE(status.ok()) << status.message();
