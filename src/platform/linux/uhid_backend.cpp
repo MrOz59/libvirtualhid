@@ -2076,6 +2076,7 @@ namespace lvh::detail {
       virtual ~UinputTouchDevice() = default;
 
       OperationStatus close_touch_device(const std::string &description) {
+        std::lock_guard lock {submit_mutex_};
         return close_uinput(description);
       }
 
@@ -2094,6 +2095,7 @@ namespace lvh::detail {
       }
 
       OperationStatus place_touch_contact(const TouchContact &contact, bool update_trackpad_buttons) {
+        std::lock_guard lock {submit_mutex_};
         if (!is_open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput touch device is closed");
         }
@@ -2192,6 +2194,7 @@ namespace lvh::detail {
       }
 
       OperationStatus release_touch_contact(std::int32_t contact_id, bool update_trackpad_buttons) {
+        std::lock_guard lock {submit_mutex_};
         if (!is_open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput touch device is closed");
         }
@@ -2246,6 +2249,7 @@ namespace lvh::detail {
       }
 
       OperationStatus emit_touch_button(bool pressed) {
+        std::lock_guard lock {submit_mutex_};
         if (!is_open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput touch device is closed");
         }
@@ -2341,6 +2345,7 @@ namespace lvh::detail {
       }
 
       std::string device_name_;
+      std::mutex submit_mutex_;
       PointerViewport desktop_;
       std::map<std::int32_t, int> contacts_;
       std::map<std::int32_t, TouchContact> latest_contacts_;

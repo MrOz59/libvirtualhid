@@ -1945,6 +1945,62 @@ namespace lvh::detail::test {
     }
   }
 
+  template<class Device>
+  LinuxInputSubmissionResult touch_parallel_updates_pipe() {
+    std::array<int, 2> descriptors {-1, -1};
+    if (::pipe(descriptors.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create pipe", errno), {}};
+    }
+
+    Device device {descriptors[1]};
+    std::vector<LinuxInputEventRecord> captured;
+    std::jthread reader {[&]() {
+      captured = read_input_events_until_eof(descriptors[0]);
+    }};
+
+    constexpr int repetitions = 80;
+    std::atomic_bool start = false;
+    OperationStatus first_status;
+    OperationStatus second_status;
+    const auto send = [&](float x, float y, OperationStatus &status) {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int index = 0; index < repetitions; ++index) {
+        status = device.place_contact({.id = 7, .x = x, .y = y, .pressure = 0.5F});
+        if (!status.ok()) {
+          return;
+        }
+      }
+    };
+    std::jthread first {[&]() {
+      send(0.2F, 0.4F, first_status);
+    }};
+    std::jthread second {[&]() {
+      send(0.7F, 0.9F, second_status);
+    }};
+    start.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+    static_cast<void>(device.close());
+    reader.join();
+
+    static_cast<void>(::close(descriptors[0]));
+    const auto status = first_status.ok() ? second_status : first_status;
+    return {status, std::move(captured)};
+  }
+
+  LinuxInputSubmissionResult linux_uinput_touch_parallel_updates_pipe(DeviceType device_type) {
+    switch (device_type) {
+      case DeviceType::touchscreen:
+        return touch_parallel_updates_pipe<UinputTouchscreen>();
+      case DeviceType::trackpad:
+        return touch_parallel_updates_pipe<UinputTrackpad>();
+      default:
+        return {OperationStatus::failure(ErrorCode::invalid_argument, "unsupported touch device type"), {}};
+    }
+  }
+
   LinuxInputSubmissionResult linux_uinput_touch_hover_sequence_pipe(DeviceType device_type) {
     switch (device_type) {
       case DeviceType::touchscreen:

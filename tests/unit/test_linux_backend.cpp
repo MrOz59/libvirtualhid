@@ -1138,6 +1138,37 @@ TEST_F(LinuxBackendTest, TouchContactSizesUseViewportPixelsAndClearUnknownSizes)
   EXPECT_EQ(axis_value(no_geometry.events, ABS_MT_TOUCH_MINOR), 0);
 }
 
+TEST_F(LinuxBackendTest, ConcurrentTouchUpdatesKeepEachContactFrameIntact) {
+  for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    const auto result = lvh::detail::test::linux_uinput_touch_parallel_updates_pipe(kind);
+    ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+    std::optional<int> x;
+    std::optional<int> y;
+    int frames = 0;
+    for (const auto &event : result.events) {
+      if (event.type == EV_ABS && event.code == ABS_MT_POSITION_X) {
+        EXPECT_FALSE(x.has_value()) << "contact X was repeated within a single input frame";
+        x = event.value;
+      } else if (event.type == EV_ABS && event.code == ABS_MT_POSITION_Y) {
+        EXPECT_FALSE(y.has_value()) << "contact Y was repeated within a single input frame";
+        y = event.value;
+      } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+        ASSERT_TRUE(x.has_value());
+        ASSERT_TRUE(y.has_value());
+        const bool first_pair = *x < 5000 && *y < 6000;
+        const bool second_pair = *x > 10000 && *y > 9000;
+        EXPECT_TRUE(first_pair || second_pair) << "two concurrent contact positions were mixed within one frame";
+        x.reset();
+        y.reset();
+        ++frames;
+      }
+    }
+    EXPECT_EQ(frames, 160);
+  }
+}
+
 TEST_F(LinuxBackendTest, UinputMultitouchKeepsLegacyAxesOnPrimaryContact) {
   for (const auto kind : {lvh::DeviceType::touchscreen, lvh::DeviceType::trackpad}) {
     const auto result = lvh::detail::test::linux_uinput_touch_primary_pointer_pipe(kind);

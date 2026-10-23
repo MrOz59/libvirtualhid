@@ -1141,6 +1141,14 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_touch_primary_pointer_pipe(DeviceType device_type);
 
   /**
+   * @brief Concurrently submit distinct X/Y touch pairs through one device.
+   *
+   * @param device_type Touchscreen or trackpad.
+   * @return Captured input stream for atomic SYN_REPORT frame assertions.
+   */
+  LinuxInputSubmissionResult linux_uinput_touch_parallel_updates_pipe(DeviceType device_type);
+
+  /**
    * @brief Exercise hover/contact/release transitions with overlapping fingers.
    *
    * @param device_type Touchscreen or trackpad.
