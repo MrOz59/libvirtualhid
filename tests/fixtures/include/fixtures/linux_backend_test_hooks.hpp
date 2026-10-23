@@ -64,6 +64,17 @@ namespace lvh::detail::test {
   };
 
   /**
+   * @brief Observed behavior when close races with an active uinput write.
+   */
+  struct LinuxUinputCloseRaceObservation {
+    bool write_started = false;
+    bool close_completed_while_write_blocked = false;
+    OperationStatus submit_status;
+    OperationStatus close_status;
+    OperationStatus after_close_status;
+  };
+
+  /**
    * @brief Result from a split relative/absolute pipe-backed mouse submission.
    */
   struct LinuxMouseInputSubmissionResult {
@@ -894,6 +905,13 @@ namespace lvh::detail::test {
    * @return Original and subsequent errors and syscall write counts.
    */
   LinuxUinputWriteFailureObservation linux_uinput_write_failure_sequence(DeviceType device_type, bool short_write);
+
+  /**
+   * @brief Block a keyboard write and attempt close from another thread.
+   *
+   * @return Observed ordering and terminal statuses.
+   */
+  LinuxUinputCloseRaceObservation linux_uinput_close_during_write();
 
   /**
    * @brief Fail during a touch release and retry on the poisoned device.
