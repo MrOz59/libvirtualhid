@@ -2485,6 +2485,7 @@ namespace lvh::detail {
       }
 
       OperationStatus place_tool(const PenToolState &state) override {
+        std::lock_guard lock {submit_mutex_};
         if (!is_open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput pen tablet is closed");
         }
@@ -2531,6 +2532,7 @@ namespace lvh::detail {
       }
 
       OperationStatus button(PenButton button, bool pressed) override {
+        std::lock_guard lock {submit_mutex_};
         if (!is_open()) {
           return OperationStatus::failure(ErrorCode::device_closed, "uinput pen tablet is closed");
         }
@@ -2541,6 +2543,7 @@ namespace lvh::detail {
       }
 
       OperationStatus close() override {
+        std::lock_guard lock {submit_mutex_};
         return close_uinput("uinput pen tablet");
       }
 
@@ -2616,6 +2619,7 @@ namespace lvh::detail {
       }
 
       std::string device_name_;
+      std::mutex submit_mutex_;
       PointerViewport desktop_;
       PenToolType last_tool_ = PenToolType::unchanged;
     };
