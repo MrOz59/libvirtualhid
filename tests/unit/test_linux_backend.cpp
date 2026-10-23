@@ -370,6 +370,63 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
     return node.path.ends_with("hidraw4") || node.path.ends_with("hidraw5");
   }));
 
+  // Two UHID sessions may advertise the same controller name. An isolated
+  // session must match its event devices and hidraw nodes by physical identity.
+  for (const auto *node : {"hidraw6", "hidraw7", "hidraw8"}) {
+    std::filesystem::create_directories(hidraw_root / node / "device");
+  }
+  {
+    std::ofstream file {hidraw_root / "hidraw6" / "device" / "uevent"};
+    file << "HID_NAME=renamed controller\n"
+         << "HID_PHYS=hermes-kms-1\n"
+         << "HID_UNIQ=controller-1\n";
+  }
+  {
+    std::ofstream file {hidraw_root / "hidraw7" / "device" / "uevent"};
+    file << "HID_NAME=libvirtualhid device\n"
+         << "HID_UNIQ=controller-1\n";
+    // Same name and unique ID without phys is insufficient for isolation.
+  }
+  {
+    std::ofstream file {hidraw_root / "hidraw8" / "device" / "uevent"};
+    file << "HID_NAME=libvirtualhid device\n"
+         << "HID_PHYS=hermes-kms-2\n"
+         << "HID_UNIQ=controller-1\n";
+  }
+  const auto isolated_uhid = lvh::detail::test::linux_discover_uhid_gamepad_nodes(
+    "libvirtualhid device",
+    "hermes-kms-1",
+    "controller-1",
+    true,
+    input_root.string(),
+    hidraw_root.string()
+  );
+  const auto isolated_path = [&](std::string_view path) {
+    return std::ranges::any_of(isolated_uhid, [path](const auto &node) {
+      return node.path == path;
+    });
+  };
+  EXPECT_TRUE(isolated_path("/dev/input/event0"));
+  EXPECT_TRUE(isolated_path("/dev/input/js0"));
+  EXPECT_TRUE(isolated_path("/dev/hidraw6"));
+  EXPECT_FALSE(isolated_path("/dev/input/event2"));
+  EXPECT_FALSE(isolated_path("/dev/input/event3"));
+  EXPECT_FALSE(isolated_path("/dev/hidraw0"));
+  EXPECT_FALSE(isolated_path("/dev/hidraw7"));
+  EXPECT_FALSE(isolated_path("/dev/hidraw8"));
+
+  const auto legacy_uhid = lvh::detail::test::linux_discover_uhid_gamepad_nodes(
+    "libvirtualhid device",
+    "hermes-kms-1",
+    "controller-1",
+    false,
+    input_root.string(),
+    hidraw_root.string()
+  );
+  EXPECT_TRUE(std::ranges::any_of(legacy_uhid, [](const auto &node) {
+    return node.path == "/dev/input/event2";
+  }));
+
   std::filesystem::remove_all(temp_dir);
 }
 
