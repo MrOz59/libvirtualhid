@@ -1096,6 +1096,9 @@ namespace lvh::detail {
       }
 
       OperationStatus close_uinput(const std::string &description) {
+        // Serialize destruction with event writes: otherwise a writer can
+        // pass the open check while another thread closes or reuses fd_.
+        std::lock_guard lock {write_mutex_};
         if (!open_.exchange(false)) {
           return OperationStatus::success();
         }
