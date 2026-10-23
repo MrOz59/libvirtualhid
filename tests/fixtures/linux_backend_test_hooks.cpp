@@ -268,8 +268,7 @@ std::ptrdiff_t lvh_linux_test_write(int fd, const std::byte *buffer, std::size_t
 
 int lvh_linux_test_ioctl(int fd, unsigned long request, unsigned long argument) {
   if (lvh::detail::test::active_test_syscalls() != nullptr && lvh::detail::test::active_test_syscalls()->override_ioctl) {
-    if (lvh::detail::test::active_test_syscalls()->write_blocked &&
-        !lvh::detail::test::active_test_syscalls()->release_blocked_write) {
+    if (lvh::detail::test::active_test_syscalls()->write_blocked && !lvh::detail::test::active_test_syscalls()->release_blocked_write) {
       lvh::detail::test::active_test_syscalls()->close_during_write = true;
     }
     if (const auto call_count = ++lvh::detail::test::active_test_syscalls()->ioctl_call_count; lvh::detail::test::active_test_syscalls()->fail_ioctl_call == call_count) {
