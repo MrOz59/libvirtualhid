@@ -790,6 +790,26 @@ namespace lvh::detail::test {
   );
 
   /**
+   * @brief Discover UHID controller nodes with optional mandatory physical identity.
+   *
+   * @param name Expected controller name.
+   * @param physical_id UHID physical identity advertised at creation.
+   * @param unique_id UHID unique identity.
+   * @param require_physical_id Fail closed when sysfs does not expose matching phys.
+   * @param input_root Test input sysfs root.
+   * @param hidraw_root Test hidraw sysfs root.
+   * @return Matching input and HIDRAW nodes.
+   */
+  std::vector<DeviceNode> linux_discover_uhid_gamepad_nodes(
+    const std::string &name,
+    std::string_view physical_id,
+    std::string_view unique_id,
+    bool require_physical_id,
+    const std::string &input_root,
+    const std::string &hidraw_root
+  );
+
+  /**
    * @brief Discover Linux input nodes for a device name.
    *
    * @param name Device name to discover.

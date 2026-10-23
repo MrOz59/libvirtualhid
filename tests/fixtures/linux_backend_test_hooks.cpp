@@ -1184,6 +1184,17 @@ namespace lvh::detail::test {
     return discover_hidraw_nodes_by_metadata(name, physical_id, unique_id, hidraw_root);
   }
 
+  std::vector<DeviceNode> linux_discover_uhid_gamepad_nodes(
+    const std::string &name,
+    std::string_view physical_id,
+    std::string_view unique_id,
+    bool require_physical_id,
+    const std::string &input_root,
+    const std::string &hidraw_root
+  ) {
+    return discover_uhid_gamepad_nodes(name, physical_id, unique_id, require_physical_id, input_root, hidraw_root);
+  }
+
   std::vector<DeviceNode> linux_discover_nodes_by_name(const std::string &name) {
     return discover_input_nodes_by_name(name);
   }
