@@ -122,6 +122,10 @@ namespace lvh::detail::test {
       int last_open_flags = 0;
       bool override_write = false;
       std::atomic_int write_call_count = 0;
+      int block_write_call = -1;
+      std::atomic_bool write_blocked = false;
+      std::atomic_bool release_blocked_write = true;
+      std::atomic_bool close_during_write = false;
       int fail_write_call = -1;
       int interrupt_write_call = -1;
       int short_write_call = -1;
@@ -230,6 +234,13 @@ int lvh_linux_test_open(const char *path, int flags) {
 std::ptrdiff_t lvh_linux_test_write(int fd, const std::byte *buffer, std::size_t size) {
   if (lvh::detail::test::active_test_syscalls() != nullptr && lvh::detail::test::active_test_syscalls()->override_write) {
     const auto call_count = ++lvh::detail::test::active_test_syscalls()->write_call_count;
+    if (lvh::detail::test::active_test_syscalls()->block_write_call == call_count) {
+      lvh::detail::test::active_test_syscalls()->write_blocked = true;
+      while (!lvh::detail::test::active_test_syscalls()->release_blocked_write) {
+        std::this_thread::yield();
+      }
+      lvh::detail::test::active_test_syscalls()->write_blocked = false;
+    }
     if (lvh::detail::test::active_test_syscalls()->fail_write_call == call_count) {
       errno = EIO;
       return -1;
@@ -257,6 +268,10 @@ std::ptrdiff_t lvh_linux_test_write(int fd, const std::byte *buffer, std::size_t
 
 int lvh_linux_test_ioctl(int fd, unsigned long request, unsigned long argument) {
   if (lvh::detail::test::active_test_syscalls() != nullptr && lvh::detail::test::active_test_syscalls()->override_ioctl) {
+    if (lvh::detail::test::active_test_syscalls()->write_blocked &&
+        !lvh::detail::test::active_test_syscalls()->release_blocked_write) {
+      lvh::detail::test::active_test_syscalls()->close_during_write = true;
+    }
     if (const auto call_count = ++lvh::detail::test::active_test_syscalls()->ioctl_call_count; lvh::detail::test::active_test_syscalls()->fail_ioctl_call == call_count) {
       errno = EINVAL;
       return -1;
@@ -1382,6 +1397,57 @@ namespace lvh::detail::test {
           return {error, error};
         }
     }
+  }
+
+  LinuxUinputConcurrentCloseObservation linux_uinput_close_during_pending_write() {
+    LinuxTestSyscalls syscalls;
+    syscalls.override_write = true;
+    syscalls.override_ioctl = true;
+    syscalls.block_write_call = 1;
+    syscalls.release_blocked_write = false;
+    ScopedLinuxTestSyscalls scoped_syscalls {syscalls};
+
+    LinuxUinputConcurrentCloseObservation observation;
+    const auto fd = open_test_fd();
+    if (fd < 0) {
+      observation.submit_status = system_error_status(ErrorCode::backend_failure, "failed to open test fd", errno);
+      observation.close_status = observation.submit_status;
+      return observation;
+    }
+
+    UinputKeyboard keyboard {fd};
+    std::jthread writer {[&]() {
+      observation.submit_status = keyboard.submit({.key_code = 0x41, .pressed = true});
+    }};
+
+    using namespace std::chrono_literals;
+    for (auto attempt = 0; attempt < 1000 && !syscalls.write_blocked; ++attempt) {
+      std::this_thread::sleep_for(1ms);
+    }
+    if (!syscalls.write_blocked) {
+      syscalls.release_blocked_write = true;
+      writer.join();
+      observation.close_status = keyboard.close();
+      observation.close_during_write = true;
+      return observation;
+    }
+
+    std::atomic_bool close_started = false;
+    std::jthread closer {[&]() {
+      close_started = true;
+      observation.close_status = keyboard.close();
+    }};
+    for (auto attempt = 0; attempt < 1000 && !close_started; ++attempt) {
+      std::this_thread::sleep_for(1ms);
+    }
+    // Give the closing thread a chance to reach the descriptor operation.
+    // A broken implementation reaches UI_DEV_DESTROY while write is blocked.
+    std::this_thread::sleep_for(10ms);
+    observation.close_during_write = syscalls.close_during_write;
+    syscalls.release_blocked_write = true;
+    closer.join();
+    writer.join();
+    return observation;
   }
 
   std::pair<OperationStatus, int> linux_uinput_interrupted_write_retry() {
