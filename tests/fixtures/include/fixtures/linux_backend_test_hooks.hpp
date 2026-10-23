@@ -64,6 +64,15 @@ namespace lvh::detail::test {
   };
 
   /**
+   * @brief Observe the ordering of concurrent uinput write and device close.
+   */
+  struct LinuxUinputConcurrentCloseObservation {
+    OperationStatus submit_status;
+    OperationStatus close_status;
+    bool close_during_write = false;
+  };
+
+  /**
    * @brief Result from a split relative/absolute pipe-backed mouse submission.
    */
   struct LinuxMouseInputSubmissionResult {
@@ -909,6 +918,13 @@ namespace lvh::detail::test {
    * @return Submission result and number of kernel writes attempted.
    */
   std::pair<OperationStatus, int> linux_uinput_interrupted_write_retry();
+
+  /**
+   * @brief Suspend one synthetic write while closing its uinput device.
+   *
+   * @return Submission and closure results plus early-destruction indicator.
+   */
+  LinuxUinputConcurrentCloseObservation linux_uinput_close_during_pending_write();
 
   /**
    * @brief Submit normalized state through a pipe-backed uinput gamepad.
