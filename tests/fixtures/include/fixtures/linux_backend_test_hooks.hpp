@@ -1179,6 +1179,13 @@ namespace lvh::detail::test {
   LinuxInputSubmissionResult linux_uinput_pen_tablet_sequence_pipe(const std::vector<PenToolState> &states);
 
   /**
+   * @brief Concurrently submit distinct tablet X/Y positions on one device.
+   *
+   * @return Captured stream for atomic pen-frame assertions.
+   */
+  LinuxInputSubmissionResult linux_uinput_pen_tablet_parallel_updates_pipe();
+
+  /**
    * @brief Submit pen tablet events after close.
    *
    * @return Final closed-device status.

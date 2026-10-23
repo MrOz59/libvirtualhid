@@ -1378,6 +1378,34 @@ TEST_F(LinuxBackendTest, PenCancelAndLeaveEndProximityUntilNextUpdate) {
   EXPECT_EQ(proximity_states, (std::vector<int> {1, 0, 1, 0, 1}));
 }
 
+TEST_F(LinuxBackendTest, ConcurrentPenUpdatesKeepEachPositionFrameIntact) {
+  const auto result = lvh::detail::test::linux_uinput_pen_tablet_parallel_updates_pipe();
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  std::optional<int> x;
+  std::optional<int> y;
+  int frames = 0;
+  for (const auto &event : result.events) {
+    if (event.type == EV_ABS && event.code == ABS_X) {
+      EXPECT_FALSE(x.has_value()) << "pen X was repeated in a single frame";
+      x = event.value;
+    } else if (event.type == EV_ABS && event.code == ABS_Y) {
+      EXPECT_FALSE(y.has_value()) << "pen Y was repeated in a single frame";
+      y = event.value;
+    } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+      ASSERT_TRUE(x.has_value());
+      ASSERT_TRUE(y.has_value());
+      const bool first_pair = *x < 5000 && *y < 6000;
+      const bool second_pair = *x > 10000 && *y > 9000;
+      EXPECT_TRUE(first_pair || second_pair) << "two concurrent pen positions were mixed within one frame";
+      x.reset();
+      y.reset();
+      ++frames;
+    }
+  }
+  EXPECT_EQ(frames, 160);
+}
+
 TEST_F(LinuxBackendTest, PenToolSwitchReleasesPreviousToolFirst) {
   const auto result = lvh::detail::test::linux_uinput_pen_tablet_sequence_pipe({
     {.tool = lvh::PenToolType::pen, .distance = 0.5F},
