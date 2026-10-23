@@ -507,7 +507,8 @@ namespace lvh::detail {
       const std::filesystem::path &uevent_path,
       std::string_view name,
       std::string_view physical_id,
-      std::string_view unique_id
+      std::string_view unique_id,
+      bool require_physical_id = false
     ) {
       std::ifstream file {uevent_path};
       if (!file) {
@@ -530,6 +531,12 @@ namespace lvh::detail {
         if (constexpr std::string_view uniq_key {"HID_UNIQ="}; line.starts_with(uniq_key)) {
           actual_unique_id = line.substr(uniq_key.size());
         }
+      }
+
+      // An explicitly seat-tagged UHID device must never fall back to
+      // HID_NAME when its stable physical identity is absent from sysfs.
+      if (require_physical_id && (physical_id.empty() || !actual_physical_id || *actual_physical_id != physical_id)) {
+        return false;
       }
 
       auto matched_stable_metadata = false;
@@ -555,7 +562,8 @@ namespace lvh::detail {
       std::string_view name,
       std::string_view physical_id,
       std::string_view unique_id,
-      const std::filesystem::path &hidraw_root = "/sys/class/hidraw"
+      const std::filesystem::path &hidraw_root = "/sys/class/hidraw",
+      bool require_physical_id = false
     ) {
       using enum DeviceNodeKind;
 
@@ -566,7 +574,7 @@ namespace lvh::detail {
       }
 
       for (std::filesystem::directory_iterator it {hidraw_root, error}, end; !error && it != end; it.increment(error)) {
-        if (!hidraw_metadata_matches(it->path() / "device" / "uevent", name, physical_id, unique_id)) {
+        if (!hidraw_metadata_matches(it->path() / "device" / "uevent", name, physical_id, unique_id, require_physical_id)) {
           continue;
         }
 
@@ -3480,8 +3488,15 @@ namespace lvh::detail {
       }
 
       std::vector<DeviceNode> device_nodes() const override {
-        auto nodes = discover_input_nodes_by_name(device_name_);
-        for (const auto &node : discover_hidraw_nodes_by_metadata(device_name_, physical_id_, unique_id_)) {
+        const auto isolated = !profile_.linux_phys.empty();
+        auto nodes = discover_input_nodes_by_name(device_name_, isolated ? std::string_view {physical_id_} : std::string_view {});
+        for (const auto &node : discover_hidraw_nodes_by_metadata(
+               device_name_,
+               physical_id_,
+               unique_id_,
+               "/sys/class/hidraw",
+               isolated
+             )) {
           append_node_if_missing(nodes, node.kind, node.path);
         }
         return nodes;
