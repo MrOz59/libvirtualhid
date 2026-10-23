@@ -1063,6 +1063,13 @@ namespace lvh::detail::test {
   LinuxMouseInputSubmissionResult linux_uinput_mouse_submit_split_pipe_sequence(const std::vector<MouseEvent> &events);
 
   /**
+   * @brief Concurrent relative mouse motions, captured as distinct event frames.
+   *
+   * @return Both-thread submission status and captured relative/absolute events.
+   */
+  LinuxMouseInputSubmissionResult linux_uinput_mouse_parallel_motion_pipe();
+
+  /**
    * @brief Place and release a contact through a pipe-backed uinput touchscreen.
    *
    * @param contact Touch contact to place.

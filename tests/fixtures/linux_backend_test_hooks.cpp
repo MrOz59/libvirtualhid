@@ -1748,6 +1748,58 @@ namespace lvh::detail::test {
     return {std::move(status), std::move(relative_records), std::move(absolute_records)};
   }
 
+  LinuxMouseInputSubmissionResult linux_uinput_mouse_parallel_motion_pipe() {
+    std::array<int, 2> relative {-1, -1};
+    if (::pipe(relative.data()) != 0) {
+      return {system_error_status(ErrorCode::backend_failure, "failed to create relative pipe", errno), {}, {}};
+    }
+    std::array<int, 2> absolute {-1, -1};
+    if (::pipe(absolute.data()) != 0) {
+      static_cast<void>(::close(relative[0]));
+      static_cast<void>(::close(relative[1]));
+      return {system_error_status(ErrorCode::backend_failure, "failed to create absolute pipe", errno), {}, {}};
+    }
+
+    UinputMouse mouse {relative[1], absolute[1]};
+    std::vector<LinuxInputEventRecord> captured;
+    std::jthread reader {[&]() {
+      captured = read_input_events_until_eof(relative[0]);
+    }};
+
+    constexpr int repetitions = 100;
+    std::atomic_bool start = false;
+    OperationStatus first_status;
+    OperationStatus second_status;
+    const auto send = [&](int x, int y, OperationStatus &status) {
+      while (!start.load()) {
+        std::this_thread::yield();
+      }
+      for (int index = 0; index < repetitions; ++index) {
+        status = mouse.submit({.kind = MouseEventKind::relative_motion, .x = x, .y = y});
+        if (!status.ok()) {
+          return;
+        }
+      }
+    };
+    std::jthread first {[&]() {
+      send(1, 101, first_status);
+    }};
+    std::jthread second {[&]() {
+      send(2, 102, second_status);
+    }};
+    start = true;
+    first.join();
+    second.join();
+    static_cast<void>(mouse.close());
+    reader.join();
+
+    auto absolute_events = read_input_events_until_eof(absolute[0]);
+    static_cast<void>(::close(relative[0]));
+    static_cast<void>(::close(absolute[0]));
+    auto status = first_status.ok() ? second_status : first_status;
+    return {std::move(status), std::move(captured), std::move(absolute_events)};
+  }
+
   LinuxInputSubmissionResult linux_uinput_touchscreen_contact_pipe(const TouchContact &contact) {
     std::array<int, 2> descriptors {-1, -1};
     if (::pipe(descriptors.data()) != 0) {
