@@ -835,10 +835,10 @@ namespace {
     ASSERT_NE(joystick, nullptr) << SDL_GetError();
     expect_sdl_joystick_profile(joystick, expected_profile, test_case.minimum_buttons, test_case.minimum_axes);
     if (expected_profile.gamepad_kind == lvh::GamepadProfileKind::xbox_one || expected_profile.gamepad_kind == lvh::GamepadProfileKind::xbox_series) {
-      // SDL's Bluetooth HIDAPI exposes the D-pad as a hat, not four raw
-      // joystick buttons. Canonical D-pad presses and Guide chords are still
-      // verified individually below, alongside the eleven ordinary buttons.
-      EXPECT_GE(SDL_JoystickNumHats(joystick), 1);
+      // SDL versions/backends expose the D-pad as either a hat or buttons.
+      // Require an actual binding, then verify every direction and Guide
+      // chord below rather than depending on one raw joystick layout.
+      EXPECT_NE(SDL_GameControllerGetBindForButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_UP).bindType, SDL_CONTROLLER_BINDTYPE_NONE);
     }
 
     struct ButtonCase {
@@ -1485,6 +1485,27 @@ TEST_F(LinuxConsumerTest, IsolatedUhidDiscoveryIncludesKernelRenamedChildren) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds {20});
+  }
+  ASSERT_FALSE(first_nodes.empty()) << "missing first session's controller input node";
+  std::error_code driver_error;
+  auto ancestor = std::filesystem::canonical(
+    std::filesystem::path {"/sys/class/input"} / std::filesystem::path {first_nodes.front()}.filename() / "device",
+    driver_error
+  );
+  ASSERT_FALSE(driver_error) << driver_error.message();
+  std::filesystem::path hid_driver;
+  while (!ancestor.empty() && ancestor != ancestor.root_path()) {
+    const auto subsystem = std::filesystem::read_symlink(ancestor / "subsystem", driver_error);
+    if (!driver_error && subsystem.filename() == "hid") {
+      hid_driver = std::filesystem::read_symlink(ancestor / "driver", driver_error).filename();
+      ASSERT_FALSE(driver_error) << "UHID device has no bound kernel driver: " << driver_error.message();
+      break;
+    }
+    ancestor = ancestor.parent_path();
+  }
+  ASSERT_FALSE(hid_driver.empty()) << "controller input node has no HID ancestor";
+  if (hid_driver != "playstation") {
+    GTEST_SKIP() << "kernel bound " << hid_driver << ", not hid-playstation; renamed motion/touchpad children are unavailable";
   }
   ASSERT_GE(first_nodes.size(), 3U) << "missing controller, motion or touchpad input child";
   ASSERT_GE(second_nodes.size(), 3U) << "missing second session's kernel input children";
