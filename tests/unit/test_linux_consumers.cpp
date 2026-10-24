@@ -834,6 +834,12 @@ namespace {
     auto *joystick = SDL_GameControllerGetJoystick(controller.get());
     ASSERT_NE(joystick, nullptr) << SDL_GetError();
     expect_sdl_joystick_profile(joystick, expected_profile, test_case.minimum_buttons, test_case.minimum_axes);
+    if (expected_profile.gamepad_kind == lvh::GamepadProfileKind::xbox_one || expected_profile.gamepad_kind == lvh::GamepadProfileKind::xbox_series) {
+      // SDL's Bluetooth HIDAPI exposes the D-pad as a hat, not four raw
+      // joystick buttons. Canonical D-pad presses and Guide chords are still
+      // verified individually below, alongside the eleven ordinary buttons.
+      EXPECT_GE(SDL_JoystickNumHats(joystick), 1);
+    }
 
     struct ButtonCase {
       lvh::GamepadButton logical_button;
@@ -1025,6 +1031,14 @@ namespace {
   };
 
   LibinputContext create_libinput_context(const std::filesystem::path &node) {
+    // A readable event node can precede its udev classification. Event numbers
+    // are reused as earlier controllers disappear, so opening libinput before
+    // the add event completes can even inherit the previous device's cached
+    // capabilities. Wait for udev before asserting touchscreen/tablet behavior.
+    if (std::system("udevadm settle --timeout=15") != 0) {
+      std::cerr << "udev did not settle before opening " << node << '\n';
+      return LibinputContext {nullptr, unref_libinput};
+    }
     LibinputContext context {libinput_path_create_context(&test_libinput_interface, nullptr), unref_libinput};
     if (context == nullptr) {
       return context;
@@ -1100,7 +1114,7 @@ TEST_F(LinuxConsumerTest, SdlSeesXboxOneCanonicalButtons) {
     .name_suffix = "SDL Xbox One",
     .stable_id = "libvirtualhid-sdl-xbox-one-test",
     .expected_product_id = 0x0B20,
-    .minimum_buttons = 15,
+    .minimum_buttons = 11,
     .minimum_axes = 6,
     .require_sdl_rumble = true,
     .require_trigger_rumble = true,
@@ -1121,7 +1135,7 @@ TEST_F(LinuxConsumerTest, SdlSeesXboxGuideChordsWithXpadneoShiftMode) {
       .name_suffix = "SDL Xbox Guide Chords",
       .stable_id = "libvirtualhid-sdl-xpadneo-guide-test",
       .expected_product_id = static_cast<std::uint16_t>(series ? 0x0B13 : 0x0B20),
-      .minimum_buttons = series ? 16 : 15,
+      .minimum_buttons = series ? 12 : 11,
       .minimum_axes = 6,
       .require_sdl_rumble = true,
       .require_trigger_rumble = true,
@@ -1139,7 +1153,7 @@ TEST_F(LinuxConsumerTest, SdlSeesXboxSeriesCanonicalButtons) {
     .name_suffix = "SDL Xbox Series",
     .stable_id = "libvirtualhid-sdl-xbox-series-test",
     .expected_product_id = 0x0B13,
-    .minimum_buttons = 16,
+    .minimum_buttons = 12,
     .minimum_axes = 6,
     .require_sdl_rumble = true,
     .require_trigger_rumble = true,
@@ -1434,6 +1448,57 @@ TEST_F(LinuxConsumerTest, LibinputSeesSplitUinputMouseMotionAndButtons) {
   ASSERT_NE(pointer_event, nullptr);
   EXPECT_EQ(libinput_event_pointer_get_button(pointer_event), BTN_EXTRA);
   EXPECT_EQ(libinput_event_pointer_get_button_state(pointer_event), LIBINPUT_BUTTON_STATE_RELEASED);
+}
+
+TEST_F(LinuxConsumerTest, IsolatedUhidDiscoveryIncludesKernelRenamedChildren) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
+  lvh::RuntimeOptions runtime_options;
+  runtime_options.backend = lvh::BackendKind::platform_default;
+  auto first_runtime = lvh::Runtime::create(runtime_options);
+  auto second_runtime = lvh::Runtime::create(runtime_options);
+  lvh::CreateGamepadOptions options;
+  options.profile = lvh::profiles::dualsense_usb();
+  options.profile.linux_phys = "hermes-kms-1";
+  options.metadata.stable_id = "02:00:00:81:00:01";
+  auto first = first_runtime->create_gamepad(options);
+  ASSERT_TRUE(first) << first.status.message();
+  options.profile.linux_phys = "hermes-kms-12";
+  options.metadata.stable_id = "02:00:00:81:00:02";
+  auto second = second_runtime->create_gamepad(options);
+  ASSERT_TRUE(second) << second.status.message();
+
+  const auto input_paths = [](const lvh::Gamepad &gamepad) {
+    std::vector<std::string> paths;
+    for (const auto &node : gamepad.device_nodes()) {
+      if (node.kind == lvh::DeviceNodeKind::input_event) {
+        paths.push_back(node.path);
+      }
+    }
+    return paths;
+  };
+  std::vector<std::string> first_nodes;
+  std::vector<std::string> second_nodes;
+  for (int attempt = 0; attempt < 150; ++attempt) {
+    first_nodes = input_paths(*first.gamepad);
+    second_nodes = input_paths(*second.gamepad);
+    if (first_nodes.size() >= 3 && second_nodes.size() >= 3) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds {20});
+  }
+  ASSERT_GE(first_nodes.size(), 3U) << "missing controller, motion or touchpad input child";
+  ASSERT_GE(second_nodes.size(), 3U) << "missing second session's kernel input children";
+  for (const auto &path : first_nodes) {
+    EXPECT_TRUE(std::ranges::find(second_nodes, path) == second_nodes.end()) << path;
+  }
+  first.gamepad.reset();
+  EXPECT_TRUE(second.gamepad->is_open());
+  const auto surviving_nodes = input_paths(*second.gamepad);
+  for (const auto &path : second_nodes) {
+    // The optional headset-jack input child can appear after the initial
+    // discovery; existing children must survive the other session's close.
+    EXPECT_NE(std::ranges::find(surviving_nodes, path), surviving_nodes.end()) << path;
+  }
 }
 
 TEST_F(LinuxConsumerTest, UinputDevicesExposeCustomPhysicalPaths) {

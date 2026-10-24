@@ -1162,6 +1162,10 @@ namespace lvh::detail::test {
     return format_mac_address(parse_mac_address(stable_id).value_or(generated_mac_address(id)));
   }
 
+  std::string linux_switch_mac_address(const CreateGamepadOptions &options, DeviceId id) {
+    return format_mac_address(switch_mac_address(id, options));
+  }
+
   bool linux_first_line_matches(std::string_view path, std::string_view expected) {
     const auto line = read_first_line(std::filesystem::path {std::string {path}});
     return line && *line == expected;

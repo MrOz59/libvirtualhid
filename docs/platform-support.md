@@ -67,6 +67,24 @@ sudo udevadm trigger --subsystem-match=input
 The consuming user may need membership in the `input` group and a new login
 session. Desktop logins may instead receive access through `uaccess`.
 
+For independent sessions, set `DeviceProfile::linux_phys` to the session's
+physical identity on every profile and keep runtimes and device handles owned
+by that session. Explicit identities prevent keyboard/mouse XTest fallback
+and require exact physical matching during node discovery. PlayStation drivers
+can leave their input children's `phys` empty and rename motion/touchpad
+devices; discovery therefore also checks the owning HID parent's `HID_PHYS`
+and controller identity. It excludes another session's children even when
+their names match. The application must provide udev rules that assign the
+matching `ID_SEAT` to uinput devices and propagate it from UHID parents to
+their input, joystick and hidraw children. A physical identity alone does not
+assign a seat or grant/restrict device access.
+
+Linux Switch Pro initialization replies use a device-specific MAC derived
+from the supplied stable identity and session physical identity. Supplying an
+explicit colon-separated MAC uses that MAC directly. USB status and device
+information replies advertise the same identity, so multiple virtual Switch
+controllers no longer share a fixed protocol MAC.
+
 Virtual Xbox One and Series controllers use `uhid` with a kernel-only vendor
 marker so physical-controller drivers such as `xpadneo` cannot intercept
 Guide-button chords. SDL and the evdev/hidraw interfaces retain the Xbox

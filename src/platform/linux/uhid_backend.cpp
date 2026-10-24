@@ -229,6 +229,30 @@ namespace lvh::detail {
       return stream.str();
     }
 
+    /**
+     * @brief Derive a locally administered Switch MAC from caller-owned identity.
+     *
+     * @param id Runtime-local device identifier used when no stable id is supplied.
+     * @param options Creation request containing the stable id and optional session identity.
+     * @return Explicit MAC, stable session-scoped MAC, or the legacy generated MAC.
+     */
+    std::array<std::uint8_t, 6> switch_mac_address(DeviceId id, const CreateGamepadOptions &options) {
+      if (const auto parsed = parse_mac_address(options.metadata.stable_id)) {
+        return *parsed;
+      }
+      if (options.metadata.stable_id.empty() && options.profile.linux_phys.empty()) {
+        return generated_mac_address(id);
+      }
+      const auto identity = options.profile.linux_phys + "/" +
+                            (options.metadata.stable_id.empty() ? std::to_string(id) : options.metadata.stable_id);
+      std::uint64_t hash = 14695981039346656037ULL;
+      for (const auto character : identity) {
+        hash ^= static_cast<std::uint8_t>(character);
+        hash *= 1099511628211ULL;
+      }
+      return {0x02, static_cast<std::uint8_t>(hash >> 32U), static_cast<std::uint8_t>(hash >> 24U), static_cast<std::uint8_t>(hash >> 16U), static_cast<std::uint8_t>(hash >> 8U), static_cast<std::uint8_t>(hash)};
+    }
+
     std::uint32_t crc32(std::span<const std::uint8_t> buffer, std::uint32_t seed = 0) {
       auto crc = seed ^ 0xFFFFFFFFU;
       for (const auto byte : buffer) {
@@ -651,6 +675,42 @@ namespace lvh::detail {
     }
 
 #if defined(__linux__)
+    /**
+     * @brief Match a kernel-created input child to its owning HID device.
+     *
+     * hid-playstation leaves input/phys empty and renames motion/touchpad
+     * children. Walk the canonical sysfs ancestry to the nearest HID uevent
+     * instead of identifying those children by their names or empty phys.
+     *
+     * @param input_node Input class entry to inspect.
+     * @param physical_id Mandatory session physical identity.
+     * @param unique_id Controller stable identity, when available.
+     * @return Whether the nearest HID parent belongs to this controller.
+     */
+    bool input_hid_parent_matches(
+      const std::filesystem::path &input_node,
+      std::string_view physical_id,
+      std::string_view unique_id
+    ) {
+      std::error_code error;
+      auto parent = std::filesystem::canonical(input_node / "device", error);
+      if (error) {
+        return false;
+      }
+      while (parent.has_relative_path()) {
+        const auto uevent = parent / "uevent";
+        std::ifstream file {uevent};
+        std::string line;
+        while (std::getline(file, line)) {
+          if (line.starts_with("HID_ID=") || line.starts_with("HID_PHYS=") || line.starts_with("HID_NAME=")) {
+            return hidraw_metadata_matches(uevent, {}, physical_id, unique_id, true);
+          }
+        }
+        parent = parent.parent_path();
+      }
+      return false;
+    }
+
     std::vector<DeviceNode> discover_uhid_gamepad_nodes(
       const std::string &name,
       std::string_view physical_id,
@@ -665,6 +725,25 @@ namespace lvh::detail {
         hidraw_root,
         require_physical_id ? physical_id : std::string_view {}
       );
+      if (require_physical_id && !physical_id.empty()) {
+        std::error_code error;
+        for (std::filesystem::directory_iterator it {input_root, error}, end; !error && it != end; it.increment(error)) {
+          const auto filename = it->path().filename().string();
+          const auto is_event = filename.starts_with("event");
+          if (!is_event && !filename.starts_with("js")) {
+            continue;
+          }
+          if (!input_hid_parent_matches(it->path(), physical_id, unique_id)) {
+            continue;
+          }
+          append_node_if_missing(
+            nodes,
+            is_event ? DeviceNodeKind::input_event : DeviceNodeKind::joystick,
+            std::filesystem::path {"/dev/input"} / it->path().filename()
+          );
+          append_node_if_missing(nodes, DeviceNodeKind::sysfs, it->path());
+        }
+      }
       for (const auto &node : discover_hidraw_nodes_by_metadata(
              name,
              physical_id,
@@ -3445,6 +3524,9 @@ namespace lvh::detail {
           playstation_mac_address_ = parse_mac_address(options.metadata.stable_id).value_or(generated_mac_address(id));
           unique_id_ = format_mac_address(playstation_mac_address_);
         }
+        if (transport_profile.gamepad_kind == GamepadProfileKind::switch_pro) {
+          switch_mac_address_ = switch_mac_address(id, options);
+        }
         if (transport_profile.linux_phys.empty()) {
           physical_id_ = std::format(
             "libvirtualhid/uhid/{:04x}:{:04x}/{}",
@@ -3755,7 +3837,7 @@ namespace lvh::detail {
           return;
         }
 
-        if (const auto reply = switch_pro_protocol::make_switch_pro_reply(report); reply.has_value()) {
+        if (const auto reply = switch_pro_protocol::make_switch_pro_reply(report, std::nullopt, switch_mac_address_); reply.has_value()) {
           static_cast<void>(write_input_report({reply->begin(), reply->end()}));
         }
       }
@@ -3874,6 +3956,7 @@ namespace lvh::detail {
       std::string physical_id_;
       std::string unique_id_;
       std::array<std::uint8_t, 6> playstation_mac_address_ {};
+      std::array<std::uint8_t, 6> switch_mac_address_ {};
       GamepadState last_state_;
       bool supports_battery_ = false;
       std::atomic_bool open_ = true;

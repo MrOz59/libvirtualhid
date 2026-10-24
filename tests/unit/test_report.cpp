@@ -12,9 +12,24 @@
 
 // local includes
 #include "fixtures/fixtures.hpp"
+#include "shared/switch_pro_protocol.hpp"
 
 #include <libvirtualhid/profiles.hpp>
 #include <libvirtualhid/report.hpp>
+
+TEST(SwitchIdentityTest, InitializationRepliesPreservePerDeviceMacInBothByteOrders) {
+  const std::array<std::uint8_t, 6> mac {0x02, 0x12, 0x34, 0x56, 0x78, 0x9A};
+  const std::array<std::uint8_t, 2> usb_status {0x80, 0x01};
+  const auto usb = lvh::detail::switch_pro_protocol::make_switch_pro_reply(usb_status, 0x42, mac);
+  ASSERT_TRUE(usb);
+  EXPECT_TRUE(std::equal(mac.rbegin(), mac.rend(), usb->begin() + 4));
+  std::array<std::uint8_t, 11> device_info {};
+  device_info[0] = 0x01;
+  device_info[10] = 0x02;
+  const auto info = lvh::detail::switch_pro_protocol::make_switch_pro_reply(device_info, 0x42, mac);
+  ASSERT_TRUE(info);
+  EXPECT_TRUE(std::equal(mac.begin(), mac.end(), info->begin() + 19));
+}
 
 namespace {
   std::byte to_byte(std::uint8_t value) {

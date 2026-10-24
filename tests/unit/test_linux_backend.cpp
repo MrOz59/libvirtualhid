@@ -203,6 +203,23 @@ TEST_F(LinuxBackendTest, DecodesTextHelpers) {
   EXPECT_EQ(lvh::detail::test::linux_hex_digit_key_code('F'), 0x46);
 }
 
+TEST_F(LinuxBackendTest, SwitchMacIdentityIsStableAndScopedToTheSession) {
+  lvh::CreateGamepadOptions options;
+  options.profile = lvh::profiles::switch_pro();
+  options.metadata.stable_id = "controller-0";
+  options.profile.linux_phys = "session-1";
+  const auto first = lvh::detail::test::linux_switch_mac_address(options, 1);
+  EXPECT_TRUE(first.starts_with("02:"));
+  EXPECT_EQ(first, lvh::detail::test::linux_switch_mac_address(options, 42));
+  options.profile.linux_phys = "session-2";
+  EXPECT_NE(first, lvh::detail::test::linux_switch_mac_address(options, 1));
+  options.metadata.stable_id = "02:03:04:05:06:07";
+  EXPECT_EQ(lvh::detail::test::linux_switch_mac_address(options, 1), "02:03:04:05:06:07");
+  options.metadata.stable_id.clear();
+  options.profile.linux_phys.clear();
+  EXPECT_EQ(lvh::detail::test::linux_switch_mac_address(options, 0x1020304), "02:00:01:02:03:04");
+}
+
 TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
   EXPECT_EQ(lvh::detail::test::linux_dualsense_mac_address("02:03:04:05:06:07", 0x1020304), "02:03:04:05:06:07");
   EXPECT_EQ(lvh::detail::test::linux_dualsense_mac_address("02-03-04-05-06-07", 0x1020304), "02:00:01:02:03:04");
@@ -1517,6 +1534,62 @@ TEST_F(LinuxBackendTest, SocketpairBackedUhidGamepadRoundTripsEvents) {
   EXPECT_EQ(result.output.last.kind, lvh::GamepadOutputKind::rumble);
   EXPECT_EQ(result.output.last.low_frequency_rumble, 0x5678);
   EXPECT_EQ(result.output.last.high_frequency_rumble, 0x1234);
+}
+
+TEST_F(LinuxBackendTest, DiscoversIsolatedUhidChildrenByHidParentIdentity) {
+  const auto root = std::filesystem::temp_directory_path() / "libvirtualhid-uhid-parent-discovery";
+  std::filesystem::remove_all(root);
+  const auto input_root = root / "class" / "input";
+  const auto hidraw_root = root / "class" / "hidraw";
+  std::filesystem::create_directories(input_root);
+  std::filesystem::create_directories(hidraw_root);
+  for (int index = 0; index < 5; ++index) {
+    const auto hid_parent = root / "devices" / ("hid" + std::to_string(index));
+    const auto input = hid_parent / "input" / ("input" + std::to_string(index));
+    const auto node = input_root / ("event" + std::to_string(index));
+    std::filesystem::create_directories(input);
+    std::filesystem::create_directories(node);
+    std::filesystem::create_directory_symlink(input, node / "device");
+    {
+      std::ofstream name {input / "name"};
+      name << (index == 1 ? "Wireless Controller Touchpad" : "Wireless Controller") << '\n';
+      std::ofstream phys {input / "phys"};
+      phys << '\n';
+      std::ofstream child_event {input / "uevent"};
+      child_event << "NAME=Wireless Controller\n";
+    }
+    if (index == 4) {
+      continue;  // No HID metadata must fail closed.
+    }
+    std::ofstream event {hid_parent / "uevent"};
+    event << "HID_ID=0003:0000054C:00000CE6\n"
+          << "HID_NAME=Wireless Controller\n"
+          << "HID_UNIQ=same-id\n";
+    if (index != 3) {
+      event << "HID_PHYS=" << (index == 2 ? "hermes-kms-2" : "hermes-kms-1") << '\n';
+    }
+  }
+  const auto nodes = lvh::detail::test::linux_discover_uhid_gamepad_nodes(
+    "Wireless Controller",
+    "hermes-kms-1",
+    "same-id",
+    true,
+    input_root.string(),
+    hidraw_root.string()
+  );
+  const auto includes = [&](std::string_view path) {
+    return std::ranges::any_of(nodes, [path](const auto &node) {
+      return node.path == path;
+    });
+  };
+  EXPECT_TRUE(includes("/dev/input/event0"));
+  EXPECT_TRUE(includes("/dev/input/event1"));
+  EXPECT_FALSE(includes("/dev/input/event2"));
+  EXPECT_FALSE(includes("/dev/input/event3"));
+  EXPECT_FALSE(includes("/dev/input/event4"));
+  EXPECT_TRUE(lvh::detail::test::linux_discover_uhid_gamepad_nodes("Wireless Controller", "hermes-kms-unknown", "same-id", true, input_root.string(), hidraw_root.string()).empty());
+  EXPECT_TRUE(lvh::detail::test::linux_discover_uhid_gamepad_nodes("Wireless Controller", "hermes-kms-1", "other-id", true, input_root.string(), hidraw_root.string()).empty());
+  std::filesystem::remove_all(root);
 }
 
 TEST_F(LinuxBackendTest, UhidGamepadAllowsExplicitPhysicalPathWithoutChangingStableIdentity) {

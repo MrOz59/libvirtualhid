@@ -765,6 +765,14 @@ namespace lvh::detail::test {
   bool linux_first_line_missing(std::string_view path);
 
   /**
+   * @brief Inspect the Switch MAC derived for a session's creation request.
+   * @param options Gamepad creation request.
+   * @param id Runtime-local device identifier.
+   * @return Formatted MAC used by initialization replies.
+   */
+  std::string linux_switch_mac_address(const CreateGamepadOptions &options, DeviceId id);
+
+  /**
    * @brief Check whether a hidraw uevent file advertises the expected HID name.
    *
    * @param path Uevent file path.

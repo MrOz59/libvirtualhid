@@ -142,22 +142,31 @@ namespace lvh::detail::switch_pro_protocol {
       copy_spi_data(reply, address, size, 0x6020U, factory_imu_calibration);
     }
 
-    inline void set_device_info_reply(SwitchProReport &reply) {
+    inline void set_device_info_reply(SwitchProReport &reply, const std::array<std::uint8_t, 6> &mac) {
       constexpr auto data_offset = 15U;
       reply[data_offset] = 0x04;
       reply[data_offset + 1U] = 0x33;
       reply[data_offset + 2U] = 0x03;  // Pro Controller.
       reply[data_offset + 3U] = 0x02;
-      std::ranges::copy(controller_mac, reply.begin() + static_cast<std::ptrdiff_t>(data_offset + 4U));
+      std::ranges::copy(mac, reply.begin() + static_cast<std::ptrdiff_t>(data_offset + 4U));
       reply[data_offset + 10U] = 0x01;
       reply[data_offset + 11U] = 0x01;
     }
 
   }  // namespace switch_pro_protocol_detail
 
+  /**
+   * @brief Answer Switch Pro initialization requests with this device's identity.
+   *
+   * @param output_report Host initialization command.
+   * @param packet_timer Optional deterministic packet timer for a reply.
+   * @param mac Device-specific MAC used consistently by USB status and device info.
+   * @return Reply report, or no value for commands that require no reply.
+   */
   inline std::optional<SwitchProReport> make_switch_pro_reply(
     std::span<const std::uint8_t> output_report,
-    std::optional<std::uint8_t> packet_timer = std::nullopt
+    std::optional<std::uint8_t> packet_timer = std::nullopt,
+    const std::array<std::uint8_t, 6> &mac = switch_pro_protocol_detail::controller_mac
   ) {
     if (output_report.empty()) {
       return std::nullopt;
@@ -174,8 +183,8 @@ namespace lvh::detail::switch_pro_protocol {
       if (output_report[1] == 0x01U) {
         reply[3] = 0x03;  // Pro Controller.
         std::copy(
-          switch_pro_protocol_detail::controller_mac.rbegin(),
-          switch_pro_protocol_detail::controller_mac.rend(),
+          mac.rbegin(),
+          mac.rend(),
           reply.begin() + 4
         );
       }
@@ -208,7 +217,7 @@ namespace lvh::detail::switch_pro_protocol {
     if (subcommand == 0x10U) {
       switch_pro_protocol_detail::set_spi_reply(reply, output_report);
     } else if (subcommand == 0x02U) {
-      switch_pro_protocol_detail::set_device_info_reply(reply);
+      switch_pro_protocol_detail::set_device_info_reply(reply, mac);
     }
     return reply;
   }

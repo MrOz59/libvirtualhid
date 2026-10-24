@@ -371,6 +371,9 @@ namespace lvh {
      * UHID. Seat managers can use it to route devices to the correct seat.
      * An empty value preserves the backend's existing physical identity.
      * This is independent of the stable_id supplied at creation time.
+     * Explicit identities require exact matching during node discovery,
+     * including kernel-renamed input children identified by their HID parent.
+     * The consuming application must install the corresponding seat policy.
      */
     std::string linux_phys;
 
