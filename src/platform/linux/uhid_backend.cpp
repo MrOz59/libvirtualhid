@@ -649,8 +649,8 @@ namespace lvh::detail {
       if (std::filesystem::exists(input_root, error)) {
         for (std::filesystem::directory_iterator it {input_root, error}, end; !error && it != end; it.increment(error)) {
           const auto filename = it->path().filename().string();
-          const auto is_event_node = filename.starts_with("event");
-          if (const auto is_joystick_node = filename.starts_with("js"); !is_event_node && !is_joystick_node) {
+          const auto is_event_node = numbered_node(filename, "event");
+          if (const auto is_joystick_node = numbered_node(filename, "js"); !is_event_node && !is_joystick_node) {
             continue;
           }
 
@@ -677,6 +677,9 @@ namespace lvh::detail {
       // by name could include another session's unrelated UHID controller.
       if (linux_phys.empty() && std::filesystem::exists(hidraw_root, error)) {
         for (std::filesystem::directory_iterator it {hidraw_root, error}, end; !error && it != end; it.increment(error)) {
+          if (!numbered_node(it->path().filename().string(), "hidraw")) {
+            continue;
+          }
           if (!hidraw_name_matches(it->path() / "device" / "uevent", name)) {
             continue;
           }
