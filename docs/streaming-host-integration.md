@@ -4,6 +4,14 @@
 keeps its network protocol, client input mapping, controller assignment,
 configuration, and feedback transport.
 
+State-adapter setters cache a replacement only after the full report succeeds.
+A rejected motion/touch packet therefore cannot poison later button updates,
+and failed cleanup retains the logical contact state for retry. Non-finite
+motion vectors and active touchpad coordinates are rejected before numeric
+HID conversion. Sticks and triggers keep their existing clamping behavior.
+A backend write failure can still require recreating the device: retaining
+the last successful logical state does not undo events already delivered.
+
 Use [`GamepadStateAdapter` in the example](../examples/gamepad_adapter.cpp)
 as the integration pattern:
 

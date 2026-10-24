@@ -307,6 +307,9 @@ namespace lvh::reports {
     }
 
     std::int16_t scale_i16(float value, float multiplier) {
+      if (std::isnan(value)) {
+        return 0;
+      }
       const auto scaled = std::clamp(value * multiplier, -32768.0F, 32767.0F);
       return static_cast<std::int16_t>(std::lround(scaled));
     }
@@ -1062,8 +1065,8 @@ namespace lvh::reports {
     normalized.left_trigger = clamp_trigger(state.left_trigger);
     normalized.right_trigger = clamp_trigger(state.right_trigger);
     for (auto &contact : normalized.touchpad_contacts) {
-      contact.x = std::clamp(contact.x, 0.0F, 1.0F);
-      contact.y = std::clamp(contact.y, 0.0F, 1.0F);
+      contact.x = clamp_trigger(contact.x);
+      contact.y = clamp_trigger(contact.y);
     }
     if (normalized.battery) {
       normalized.battery->percentage = std::min<std::uint8_t>(100U, normalized.battery->percentage);

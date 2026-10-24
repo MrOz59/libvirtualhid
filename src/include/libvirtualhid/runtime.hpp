@@ -172,6 +172,10 @@ namespace lvh {
     /**
      * @brief Submit the latest gamepad input state.
      *
+     * Motion vectors and active touchpad coordinates must be finite. Invalid
+     * input is rejected before packing or submitting a report, without changing
+     * the last submitted state. Sticks/triggers retain their clamping behavior.
+     *
      * @param state Gamepad input state.
      * @return Submit operation status.
      */

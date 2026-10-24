@@ -212,8 +212,14 @@ namespace lvh {
   }
 
   OperationStatus GamepadStateAdapter::set_state(const GamepadState &state) {
-    state_ = state;
-    return submit();
+    if (const auto status = validate_gamepad(gamepad_.get()); !status.ok()) {
+      return status;
+    }
+    const auto status = gamepad_->submit(state);
+    if (status.ok()) {
+      state_ = state;
+    }
+    return status;
   }
 
   OperationStatus GamepadStateAdapter::set_button(GamepadButton button, bool pressed) {
@@ -224,28 +230,33 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose the requested button");
     }
 
-    state_.buttons.set(button, pressed);
-    return submit();
+    auto candidate = state_;
+    candidate.buttons.set(button, pressed);
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_left_stick(Stick stick) {
-    state_.left_stick = stick;
-    return submit();
+    auto candidate = state_;
+    candidate.left_stick = stick;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_right_stick(Stick stick) {
-    state_.right_stick = stick;
-    return submit();
+    auto candidate = state_;
+    candidate.right_stick = stick;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_left_trigger(float value) {
-    state_.left_trigger = value;
-    return submit();
+    auto candidate = state_;
+    candidate.left_trigger = value;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_right_trigger(float value) {
-    state_.right_trigger = value;
-    return submit();
+    auto candidate = state_;
+    candidate.right_trigger = value;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_acceleration(std::optional<Vector3> acceleration) {
@@ -256,8 +267,9 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose motion sensor input");
     }
 
-    state_.acceleration = acceleration;
-    return submit();
+    auto candidate = state_;
+    candidate.acceleration = acceleration;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_gyroscope(std::optional<Vector3> gyroscope) {
@@ -268,8 +280,9 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose motion sensor input");
     }
 
-    state_.gyroscope = gyroscope;
-    return submit();
+    auto candidate = state_;
+    candidate.gyroscope = gyroscope;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_motion(Vector3 acceleration, Vector3 gyroscope) {
@@ -280,9 +293,10 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose motion sensor input");
     }
 
-    state_.acceleration = acceleration;
-    state_.gyroscope = gyroscope;
-    return submit();
+    auto candidate = state_;
+    candidate.acceleration = acceleration;
+    candidate.gyroscope = gyroscope;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::clear_motion() {
@@ -293,9 +307,10 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose motion sensor input");
     }
 
-    state_.acceleration.reset();
-    state_.gyroscope.reset();
-    return submit();
+    auto candidate = state_;
+    candidate.acceleration.reset();
+    candidate.gyroscope.reset();
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_battery(GamepadBattery battery) {
@@ -306,8 +321,9 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose battery input");
     }
 
-    state_.battery = battery;
-    return submit();
+    auto candidate = state_;
+    candidate.battery = battery;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::clear_battery() {
@@ -318,8 +334,9 @@ namespace lvh {
       return unsupported_feature("selected gamepad profile cannot expose battery input");
     }
 
-    state_.battery.reset();
-    return submit();
+    auto candidate = state_;
+    candidate.battery.reset();
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::set_touchpad_contact(std::size_t index, GamepadTouchContact contact) {
@@ -333,8 +350,9 @@ namespace lvh {
       return OperationStatus::failure(ErrorCode::invalid_argument, "touchpad contact index is out of range");
     }
 
-    state_.touchpad_contacts[index] = contact;
-    return submit();
+    auto candidate = state_;
+    candidate.touchpad_contacts[index] = contact;
+    return set_state(candidate);
   }
 
   OperationStatus GamepadStateAdapter::clear_touchpad_contact(std::size_t index) {
@@ -348,8 +366,9 @@ namespace lvh {
       return OperationStatus::failure(ErrorCode::invalid_argument, "touchpad contact index is out of range");
     }
 
-    state_.touchpad_contacts[index] = {};
-    return submit();
+    auto candidate = state_;
+    candidate.touchpad_contacts[index] = {};
+    return set_state(candidate);
   }
 
   void GamepadStateAdapter::set_output_callback(const OutputCallback &callback) {

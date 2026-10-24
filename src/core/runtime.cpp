@@ -221,6 +221,22 @@ namespace lvh::detail {
 namespace lvh {
   namespace {
 
+    /** @brief Reject non-finite sensor/contact data before HID numeric conversion. */
+    OperationStatus validate_gamepad_state(const GamepadState &state) {
+      const auto finite = [](const std::optional<Vector3> &vector) {
+        return !vector || (std::isfinite(vector->x) && std::isfinite(vector->y) && std::isfinite(vector->z));
+      };
+      if (!finite(state.acceleration) || !finite(state.gyroscope)) {
+        return OperationStatus::failure(ErrorCode::invalid_argument, "gamepad motion values must be finite");
+      }
+      for (const auto &contact : state.touchpad_contacts) {
+        if (contact.active && (!std::isfinite(contact.x) || !std::isfinite(contact.y))) {
+          return OperationStatus::failure(ErrorCode::invalid_argument, "active gamepad touch coordinates must be finite");
+        }
+      }
+      return OperationStatus::success();
+    }
+
     OperationStatus validate_gamepad_options(const CreateGamepadOptions &options) {
       using enum ErrorCode;
 
@@ -593,6 +609,9 @@ namespace lvh {
     return with_device(device_, [&state](auto &device) {
       if (!device.open) {
         return OperationStatus::failure(ErrorCode::device_closed, "gamepad is closed");
+      }
+      if (const auto status = validate_gamepad_state(state); !status.ok()) {
+        return status;
       }
 
       auto report = reports::pack_input_report(device.options.profile, state);

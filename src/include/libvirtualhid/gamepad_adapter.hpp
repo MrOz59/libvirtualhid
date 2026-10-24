@@ -179,7 +179,11 @@ namespace lvh {
     const GamepadProfileSupport &support() const;
 
     /**
-     * @brief Get the cached full gamepad state.
+     * @brief Get the last full gamepad state submitted successfully.
+     *
+     * A failed setter leaves this logical state unchanged. A backend write
+     * failure can still require recreating the kernel device; the cache is
+     * not a guarantee that partially delivered input was rolled back.
      *
      * @return Cached gamepad state.
      */
@@ -200,7 +204,7 @@ namespace lvh {
     OperationStatus submit();
 
     /**
-     * @brief Replace and submit the cached full gamepad state.
+     * @brief Submit a replacement state and cache it only after success.
      *
      * @param state New full gamepad state.
      * @return Submit operation status.

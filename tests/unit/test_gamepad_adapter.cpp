@@ -4,13 +4,49 @@
  */
 
 // standard includes
+#include <functional>
+#include <limits>
 #include <optional>
 #include <utility>
+#include <vector>
 
 // local includes
 #include "fixtures/fixtures.hpp"
 
 #include <libvirtualhid/libvirtualhid.hpp>
+
+namespace {
+  void expect_same_state(const lvh::GamepadState &actual, const lvh::GamepadState &expected) {
+    EXPECT_EQ(actual.buttons.raw_bits(), expected.buttons.raw_bits());
+    EXPECT_FLOAT_EQ(actual.left_stick.x, expected.left_stick.x);
+    EXPECT_FLOAT_EQ(actual.left_stick.y, expected.left_stick.y);
+    EXPECT_FLOAT_EQ(actual.right_stick.x, expected.right_stick.x);
+    EXPECT_FLOAT_EQ(actual.right_stick.y, expected.right_stick.y);
+    EXPECT_FLOAT_EQ(actual.left_trigger, expected.left_trigger);
+    EXPECT_FLOAT_EQ(actual.right_trigger, expected.right_trigger);
+    for (const auto &pair : {std::pair {actual.acceleration, expected.acceleration}, std::pair {actual.gyroscope, expected.gyroscope}}) {
+      ASSERT_EQ(pair.first.has_value(), pair.second.has_value());
+      if (pair.first) {
+        EXPECT_FLOAT_EQ(pair.first->x, pair.second->x);
+        EXPECT_FLOAT_EQ(pair.first->y, pair.second->y);
+        EXPECT_FLOAT_EQ(pair.first->z, pair.second->z);
+      }
+    }
+    ASSERT_EQ(actual.battery.has_value(), expected.battery.has_value());
+    if (actual.battery) {
+      EXPECT_EQ(actual.battery->state, expected.battery->state);
+      EXPECT_EQ(actual.battery->percentage, expected.battery->percentage);
+    }
+    for (std::size_t index = 0; index < actual.touchpad_contacts.size(); ++index) {
+      const auto &one = actual.touchpad_contacts[index];
+      const auto &two = expected.touchpad_contacts[index];
+      EXPECT_EQ(one.id, two.id);
+      EXPECT_EQ(one.active, two.active);
+      EXPECT_FLOAT_EQ(one.x, two.x);
+      EXPECT_FLOAT_EQ(one.y, two.y);
+    }
+  }
+}  // namespace
 
 TEST(GamepadAdapterTest, ReportsProfileSupport) {
   const auto generic = lvh::profiles::generic_gamepad();
@@ -339,6 +375,119 @@ TEST(GamepadAdapterTest, ReplacesStateAndClearsOptionalInputs) {
   EXPECT_EQ(adapter.clear_touchpad_contact(2).code(), lvh::ErrorCode::invalid_argument);
   EXPECT_TRUE(adapter.clear_touchpad_contact(1).ok());
   EXPECT_FALSE(adapter.gamepad()->last_submitted_state().touchpad_contacts[1].active);
+}
+
+TEST(GamepadAdapterTest, FailedUpdatesDoNotPoisonTheLastSubmittedState) {
+  auto runtime = lvh::Runtime::create();
+  ASSERT_NE(runtime, nullptr);
+  lvh::CreateGamepadOptions options;
+  options.profile = lvh::profiles::dualsense();
+  auto created = lvh::GamepadStateAdapter::create(*runtime, options);
+  ASSERT_TRUE(created);
+  auto &adapter = *created.adapter;
+  ASSERT_TRUE(adapter.set_button(lvh::GamepadButton::a, true).ok());
+  ASSERT_TRUE(adapter.set_motion({1.0F, 2.0F, 3.0F}, {4.0F, 5.0F, 6.0F}).ok());
+  const auto nan = std::numeric_limits<float>::quiet_NaN();
+  const auto inf = std::numeric_limits<float>::infinity();
+  const auto expected = adapter.state();
+  const std::vector<std::function<lvh::OperationStatus()>> rejected {
+    [&] {
+      auto bad = adapter.state();
+      bad.acceleration->x = nan;
+      bad.buttons.clear();
+      return adapter.set_state(bad);
+    },
+    [&] {
+      return adapter.set_acceleration(lvh::Vector3 {nan, 0.0F, 0.0F});
+    },
+    [&] {
+      return adapter.set_gyroscope(lvh::Vector3 {0.0F, inf, 0.0F});
+    },
+    [&] {
+      return adapter.set_motion({7.0F, 8.0F, 9.0F}, {nan, 0.0F, 0.0F});
+    },
+    [&] {
+      return adapter.set_touchpad_contact(0, {.id = 1, .active = true, .x = nan, .y = 0.5F});
+    },
+  };
+  for (const auto &reject : rejected) {
+    const auto count = adapter.gamepad()->submit_count();
+    EXPECT_EQ(reject().code(), lvh::ErrorCode::invalid_argument);
+    EXPECT_EQ(adapter.gamepad()->submit_count(), count);
+    expect_same_state(adapter.state(), expected);
+    EXPECT_FLOAT_EQ(adapter.state().acceleration->x, 1.0F);
+    EXPECT_FLOAT_EQ(adapter.state().gyroscope->x, 4.0F);
+    // A following unrelated packet must still be accepted after each error.
+    EXPECT_TRUE(adapter.set_button(lvh::GamepadButton::a, true).ok());
+  }
+}
+
+TEST(GamepadAdapterTest, ClosedDeviceUpdatesAndCleanupPreserveTheCommittedCache) {
+  auto runtime = lvh::Runtime::create();
+  ASSERT_NE(runtime, nullptr);
+  lvh::CreateGamepadOptions options;
+  options.profile = lvh::profiles::dualsense();
+  auto created = lvh::GamepadStateAdapter::create(*runtime, options);
+  ASSERT_TRUE(created);
+  auto &adapter = *created.adapter;
+  ASSERT_TRUE(adapter.set_button(lvh::GamepadButton::a, true).ok());
+  ASSERT_TRUE(adapter.set_motion({1.0F, 2.0F, 3.0F}, {4.0F, 5.0F, 6.0F}).ok());
+  ASSERT_TRUE(adapter.set_battery({.state = lvh::GamepadBatteryState::charging, .percentage = 75}).ok());
+  ASSERT_TRUE(adapter.set_touchpad_contact(0, {.id = 1, .active = true, .x = 0.2F, .y = 0.3F}).ok());
+  const auto expected = adapter.state();
+  ASSERT_TRUE(adapter.close().ok());
+  const std::vector<std::function<lvh::OperationStatus()>> rejected {
+    [&] {
+      return adapter.set_state({});
+    },
+    [&] {
+      return adapter.set_button(lvh::GamepadButton::a, false);
+    },
+    [&] {
+      return adapter.set_left_stick({0.5F, 0.5F});
+    },
+    [&] {
+      return adapter.set_right_stick({0.5F, 0.5F});
+    },
+    [&] {
+      return adapter.set_left_trigger(0.5F);
+    },
+    [&] {
+      return adapter.set_right_trigger(0.5F);
+    },
+    [&] {
+      return adapter.set_acceleration(std::nullopt);
+    },
+    [&] {
+      return adapter.set_gyroscope(std::nullopt);
+    },
+    [&] {
+      return adapter.set_motion({}, {});
+    },
+    [&] {
+      return adapter.clear_motion();
+    },
+    [&] {
+      return adapter.set_battery({.state = lvh::GamepadBatteryState::full, .percentage = 100});
+    },
+    [&] {
+      return adapter.clear_battery();
+    },
+    [&] {
+      return adapter.set_touchpad_contact(0, {});
+    },
+    [&] {
+      return adapter.clear_touchpad_contact(0);
+    },
+  };
+  for (const auto &reject : rejected) {
+    EXPECT_EQ(reject().code(), lvh::ErrorCode::device_closed);
+    expect_same_state(adapter.state(), expected);
+    ASSERT_TRUE(adapter.state().acceleration);
+    ASSERT_TRUE(adapter.state().battery);
+    EXPECT_FLOAT_EQ(adapter.state().acceleration->x, 1.0F);
+    EXPECT_EQ(adapter.state().battery->percentage, 75);
+  }
 }
 
 TEST(GamepadAdapterTest, MovesAdaptersAndClosesOwnedGamepadOnDestruction) {

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -97,6 +98,21 @@ TEST(ReportTest, NormalizesAxesAndTriggers) {
   EXPECT_EQ(lvh::reports::normalize_trigger(0.0F), 0);
   EXPECT_EQ(lvh::reports::normalize_trigger(1.0F), 255);
   EXPECT_EQ(lvh::reports::normalize_trigger(2.0F), 255);
+}
+
+TEST(ReportTest, NormalizesUnusedNonfiniteContactsWithoutInvalidNumericConversions) {
+  const auto nan = std::numeric_limits<float>::quiet_NaN();
+  lvh::GamepadState state;
+  state.touchpad_contacts[0] = {.id = 1, .active = false, .x = nan, .y = nan};
+  state.acceleration = lvh::Vector3 {nan, 0.0F, 0.0F};
+  const auto normalized = lvh::reports::normalize_state(state);
+  EXPECT_FLOAT_EQ(normalized.touchpad_contacts[0].x, 0.0F);
+  EXPECT_FLOAT_EQ(normalized.touchpad_contacts[0].y, 0.0F);
+  // Direct report packing is also a public helper. It must not round NaN
+  // sensor values even when the caller bypasses Runtime's stricter validation.
+  const auto report = lvh::reports::pack_input_report(lvh::profiles::dualsense_usb(), state);
+  ASSERT_FALSE(report.empty());
+  EXPECT_EQ(read_i16_le(report, 22), 0);
 }
 
 TEST(ReportTest, EncodesHatSwitch) {
