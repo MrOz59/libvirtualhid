@@ -1226,9 +1226,10 @@ namespace lvh::detail::test {
    * @brief Check whether the Linux backend prefers UHID for a gamepad profile.
    *
    * @param kind Gamepad profile kind.
+   * @param prefer_input_events Whether the consumer requests the input-event path.
    * @return `true` when Linux attempts UHID before any fallback.
    */
-  bool linux_gamepad_prefers_uhid(GamepadProfileKind kind);
+  bool linux_gamepad_prefers_uhid(GamepadProfileKind kind, bool prefer_input_events = false);
 
   /**
    * @brief Check whether the Linux backend supports a gamepad profile through uinput.

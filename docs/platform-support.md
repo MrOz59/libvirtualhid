@@ -39,6 +39,14 @@ trigger rumble and battery notifications. FreeBSD uses `uinput` for all
 profiles and does not expose descriptor-driven PlayStation, Switch Pro, or
 Xbox features.
 
+Consumers without hidraw access can set `CreateGamepadOptions::prefer_input_events`
+to create generic and Xbox controllers through uinput even when UHID is
+available. This retains ordinary evdev rumble and the requested controller
+family, but not native trigger rumble or battery notifications. Linux returns
+`unsupported_profile` for this preference with PlayStation or Switch profiles,
+instead of silently creating an inaccessible native HID device. The default
+remains native HID with the existing uinput fallback for Xbox controllers.
+
 Install persistent rules such as `/etc/udev/rules.d/60-libvirtualhid.rules`
 for the account running the host application:
 

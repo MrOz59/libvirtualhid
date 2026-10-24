@@ -1676,6 +1676,17 @@ TEST_F(LinuxBackendTest, XboxOneAndSeriesPreferBluetoothUhidWithUinputFallback) 
   }
 }
 
+TEST_F(LinuxBackendTest, InputEventPreferenceBypassesNativeHidSelection) {
+  using enum lvh::GamepadProfileKind;
+  for (const auto kind : {generic, xbox_360, xbox_one, xbox_series}) {
+    EXPECT_TRUE(lvh::detail::test::linux_gamepad_uses_uinput(kind));
+    EXPECT_FALSE(lvh::detail::test::linux_gamepad_prefers_uhid(kind, true));
+  }
+  for (const auto kind : {dualshock4, dualsense, switch_pro}) {
+    EXPECT_FALSE(lvh::detail::test::linux_gamepad_uses_uinput(kind));
+  }
+}
+
 TEST_F(LinuxBackendTest, SocketpairBackedSwitchProUsesNativeUhidProtocol) {
   const auto result = lvh::detail::test::linux_switch_pro_uhid_socketpair_reports();
   EXPECT_TRUE(result.create_status.ok()) << result.create_status.message();

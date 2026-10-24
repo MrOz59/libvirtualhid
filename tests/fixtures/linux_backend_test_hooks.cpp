@@ -2419,8 +2419,8 @@ namespace lvh::detail::test {
     return result;
   }
 
-  bool linux_gamepad_prefers_uhid(GamepadProfileKind kind) {
-    return prefers_uhid_gamepad_profile(kind);
+  bool linux_gamepad_prefers_uhid(GamepadProfileKind kind, bool prefer_input_events) {
+    return prefers_uhid_gamepad_profile(kind, prefer_input_events);
   }
 
   bool linux_gamepad_uses_uinput(GamepadProfileKind kind) {

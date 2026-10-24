@@ -456,6 +456,18 @@ namespace lvh {
      * @brief Consumer metadata associated with the device.
      */
     GamepadMetadata metadata;
+
+    /**
+     * @brief Prefer an input-event device over native HID where a separate path exists.
+     *
+     * Linux honors this for generic and Xbox profiles by using uinput even
+     * when UHID is available. This preserves evdev force feedback for consumers
+     * without hidraw access. Query the created device's effective profile for
+     * reduced capabilities, such as unavailable trigger rumble and battery.
+     * Linux rejects this request for profiles without a uinput implementation;
+     * backends without a separate input-event path may ignore the preference.
+     */
+    bool prefer_input_events = false;
   };
 
   /**

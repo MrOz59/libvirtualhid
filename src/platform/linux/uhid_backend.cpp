@@ -311,7 +311,10 @@ namespace lvh::detail {
     }
 
 #if defined(__linux__)
-    bool prefers_uhid_gamepad_profile(GamepadProfileKind kind) {
+    bool prefers_uhid_gamepad_profile(GamepadProfileKind kind, bool prefer_input_events = false) {
+      if (prefer_input_events) {
+        return false;
+      }
       switch (kind) {
         using enum GamepadProfileKind;
 
@@ -4026,8 +4029,11 @@ namespace lvh::detail {
       }
 
       BackendGamepadCreationResult create_gamepad(DeviceId id, const CreateGamepadOptions &options) override {
+        if (options.prefer_input_events && !uses_uinput_gamepad_profile(options.profile.gamepad_kind)) {
+          return {OperationStatus::failure(ErrorCode::unsupported_profile, "requested gamepad profile has no input-event backend"), nullptr};
+        }
 #if defined(__linux__)
-        if (prefers_uhid_gamepad_profile(options.profile.gamepad_kind)) {
+        if (prefers_uhid_gamepad_profile(options.profile.gamepad_kind, options.prefer_input_events)) {
           const auto fd = system_open(uhid_path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
           if (fd >= 0) {
             auto gamepad = std::make_unique<UhidGamepad>(fd);

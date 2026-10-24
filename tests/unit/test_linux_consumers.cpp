@@ -85,6 +85,7 @@ namespace {
     bool require_battery = false;
     bool require_motion = false;
     bool expect_live_input = true;
+    bool prefer_input_events = false;
   };
 
   /**
@@ -530,6 +531,7 @@ namespace {
     options.profile.name = unique_device_name(test_case.name_suffix);
     options.metadata.has_battery = test_case.require_battery;
     options.metadata.stable_id = std::string {test_case.stable_id};
+    options.prefer_input_events = test_case.prefer_input_events;
 
     return runtime.create_gamepad(options);
   }
@@ -564,7 +566,7 @@ namespace {
     auto created = create_sdl_gamepad(*runtime, test_case);
     ASSERT_TRUE(created) << created.status.message();
 
-    if (test_case.require_sdl_rumble) {
+    if (test_case.require_sdl_rumble && !test_case.prefer_input_events) {
       const auto hidraw_node = wait_for_hidraw_node(*created.gamepad);
       ASSERT_TRUE(hidraw_node.has_value())
         << "No hidraw node was discovered. Reported device nodes: "
@@ -1120,6 +1122,40 @@ TEST_F(LinuxConsumerTest, SdlSeesXboxOneCanonicalButtons) {
     .require_trigger_rumble = true,
     .require_battery = true,
   });
+}
+
+TEST_F(LinuxConsumerTest, InputEventPreferencePreservesXboxRumbleWithUhidAvailable) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uinput"));
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
+  for (const auto &profile : {lvh::profiles::xbox_one(), lvh::profiles::xbox_series()}) {
+    run_sdl_canonical_gamepad_test({
+      .profile = profile,
+      .name_suffix = "SDL Input Event Xbox",
+      .stable_id = "libvirtualhid-input-events-xbox",
+      .expected_product_id = profile.gamepad_kind == lvh::GamepadProfileKind::xbox_series ? 0x0B13 : 0x0B20,
+      .minimum_buttons = 11,
+      .minimum_axes = 6,
+      .require_sdl_rumble = true,
+      .prefer_input_events = true,
+    });
+    auto runtime = lvh::Runtime::create({.backend = lvh::BackendKind::platform_default});
+    auto gamepad = runtime->create_gamepad({.profile = profile, .prefer_input_events = true});
+    ASSERT_TRUE(gamepad) << gamepad.status.message();
+    EXPECT_FALSE(gamepad.gamepad->profile().capabilities.supports_trigger_rumble);
+    EXPECT_FALSE(gamepad.gamepad->profile().capabilities.supports_battery);
+    for (const auto &node : gamepad.gamepad->device_nodes()) {
+      EXPECT_NE(node.kind, lvh::DeviceNodeKind::hidraw);
+    }
+  }
+}
+
+TEST_F(LinuxConsumerTest, InputEventPreferenceRejectsProfilesWithoutThatBackend) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uinput"));
+  auto runtime = lvh::Runtime::create({.backend = lvh::BackendKind::platform_default});
+  for (const auto &profile : {lvh::profiles::dualshock4(), lvh::profiles::dualsense(), lvh::profiles::switch_pro()}) {
+    const auto result = runtime->create_gamepad({.profile = profile, .prefer_input_events = true});
+    EXPECT_EQ(result.status.code(), lvh::ErrorCode::unsupported_profile);
+  }
 }
 
 TEST_F(LinuxConsumerTest, SdlSeesXboxGuideChordsWithXpadneoShiftMode) {
