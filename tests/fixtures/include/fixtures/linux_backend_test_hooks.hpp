@@ -826,6 +826,13 @@ namespace lvh::detail::test {
   std::vector<DeviceNode> linux_discover_nodes_by_name(const std::string &name);
 
   /**
+   * @brief Discover only the nodes beneath one owned uinput sysfs directory.
+   * @param syspath Exact input directory, or empty when it is unavailable.
+   * @return Event and joystick nodes owned by that directory.
+   */
+  std::vector<DeviceNode> linux_discover_owned_uinput_nodes(const std::string &syspath);
+
+  /**
    * @brief Discover Linux input nodes for a device name with explicit sysfs roots.
    *
    * @param name Device name to discover.

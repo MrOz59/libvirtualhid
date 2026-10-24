@@ -423,8 +423,9 @@ TEST_F(LinuxBackendTest, CoversLinuxDiscoveryAndIdentityHelpers) {
       return node.path == path;
     });
   };
-  EXPECT_TRUE(isolated_path("/dev/input/event0"));
-  EXPECT_TRUE(isolated_path("/dev/input/js0"));
+  // Name/seat-only uinput peers do not belong to this UHID handle.
+  EXPECT_FALSE(isolated_path("/dev/input/event0"));
+  EXPECT_FALSE(isolated_path("/dev/input/js0"));
   EXPECT_TRUE(isolated_path("/dev/hidraw6"));
   EXPECT_FALSE(isolated_path("/dev/input/event2"));
   EXPECT_FALSE(isolated_path("/dev/input/event3"));
@@ -1543,18 +1544,23 @@ TEST_F(LinuxBackendTest, DiscoversIsolatedUhidChildrenByHidParentIdentity) {
   const auto hidraw_root = root / "class" / "hidraw";
   std::filesystem::create_directories(input_root);
   std::filesystem::create_directories(hidraw_root);
-  for (int index = 0; index < 5; ++index) {
+  for (int index = 0; index < 8; ++index) {
     const auto hid_parent = root / "devices" / ("hid" + std::to_string(index));
     const auto input = hid_parent / "input" / ("input" + std::to_string(index));
     const auto node = input_root / ("event" + std::to_string(index));
     std::filesystem::create_directories(input);
     std::filesystem::create_directories(node);
     std::filesystem::create_directory_symlink(input, node / "device");
+    const auto hidraw = hidraw_root / ("hidraw" + std::to_string(index));
+    std::filesystem::create_directories(hidraw);
+    std::filesystem::create_directory_symlink(hid_parent, hidraw / "device");
     {
       std::ofstream name {input / "name"};
       name << (index == 1 ? "Wireless Controller Touchpad" : "Wireless Controller") << '\n';
       std::ofstream phys {input / "phys"};
-      phys << '\n';
+      // A same-name/phys child with another unique ID must not bypass the
+      // HID-parent check through the name-based discovery path.
+      phys << (index == 5 ? "hermes-kms-1" : "") << '\n';
       std::ofstream child_event {input / "uevent"};
       child_event << "NAME=Wireless Controller\n";
     }
@@ -1564,7 +1570,8 @@ TEST_F(LinuxBackendTest, DiscoversIsolatedUhidChildrenByHidParentIdentity) {
     std::ofstream event {hid_parent / "uevent"};
     event << "HID_ID=0003:0000054C:00000CE6\n"
           << "HID_NAME=Wireless Controller\n"
-          << "HID_UNIQ=same-id\n";
+          << (index == 6 ? "" : index == 5 ? "HID_UNIQ=another-controller\n" :
+                                             "HID_UNIQ=same-id\n");
     if (index != 3) {
       event << "HID_PHYS=" << (index == 2 ? "hermes-kms-2" : "hermes-kms-1") << '\n';
     }
@@ -1587,8 +1594,39 @@ TEST_F(LinuxBackendTest, DiscoversIsolatedUhidChildrenByHidParentIdentity) {
   EXPECT_FALSE(includes("/dev/input/event2"));
   EXPECT_FALSE(includes("/dev/input/event3"));
   EXPECT_FALSE(includes("/dev/input/event4"));
+  EXPECT_FALSE(includes("/dev/input/event5"));
+  EXPECT_FALSE(includes("/dev/input/event6"));
+  EXPECT_TRUE(includes("/dev/input/event7"));
+  EXPECT_TRUE(includes("/dev/hidraw0"));
+  EXPECT_FALSE(includes("/dev/hidraw2"));
+  EXPECT_FALSE(includes("/dev/hidraw3"));
+  EXPECT_FALSE(includes("/dev/hidraw4"));
+  EXPECT_FALSE(includes("/dev/hidraw5"));
+  EXPECT_FALSE(includes("/dev/hidraw6"));
   EXPECT_TRUE(lvh::detail::test::linux_discover_uhid_gamepad_nodes("Wireless Controller", "hermes-kms-unknown", "same-id", true, input_root.string(), hidraw_root.string()).empty());
   EXPECT_TRUE(lvh::detail::test::linux_discover_uhid_gamepad_nodes("Wireless Controller", "hermes-kms-1", "other-id", true, input_root.string(), hidraw_root.string()).empty());
+  std::filesystem::remove_all(root);
+}
+
+TEST_F(LinuxBackendTest, UinputDiscoveryNeverIncludesSameNamePeersOrStaleNodes) {
+  const auto root = std::filesystem::temp_directory_path() / "libvirtualhid-owned-uinput-discovery";
+  std::filesystem::remove_all(root);
+  const auto owned = root / "input0";
+  const auto peer = root / "input1";
+  for (const auto &path : {owned / "event4", owned / "js2", owned / "event", owned / "event4-other", owned / "js", peer / "event5"}) {
+    std::filesystem::create_directories(path);
+  }
+  const auto nodes = lvh::detail::test::linux_discover_owned_uinput_nodes(owned.string());
+  EXPECT_EQ(nodes.size(), 4U);
+  EXPECT_TRUE(std::ranges::any_of(nodes, [](const auto &node) {
+    return node.kind == lvh::DeviceNodeKind::input_event && node.path == "/dev/input/event4";
+  }));
+  EXPECT_TRUE(std::ranges::any_of(nodes, [](const auto &node) {
+    return node.kind == lvh::DeviceNodeKind::joystick && node.path == "/dev/input/js2";
+  }));
+  EXPECT_TRUE(lvh::detail::test::linux_discover_owned_uinput_nodes("").empty());
+  std::filesystem::remove_all(owned);
+  EXPECT_TRUE(lvh::detail::test::linux_discover_owned_uinput_nodes(owned.string()).empty());
   std::filesystem::remove_all(root);
 }
 

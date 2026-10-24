@@ -73,6 +73,13 @@ namespace lvh {
     /**
      * @brief Get platform-visible nodes associated with the device.
      *
+     * Linux uinput nodes are resolved beneath the input directory owned by
+     * this handle. UHID nodes must match both the physical identity and the
+     * controller's unique identity, including on a shared desktop. Discovery can be empty
+     * while the kernel creates children and may be retried after hotplug.
+     * Paths are diagnostic snapshots: privileged consumers must open and
+     * revalidate the current device before changing its permissions.
+     *
      * @return Device nodes and diagnostic paths currently known to the backend.
      */
     virtual std::vector<DeviceNode> device_nodes() const = 0;

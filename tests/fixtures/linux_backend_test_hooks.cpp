@@ -567,6 +567,13 @@ extern "C" void lvh_linux_test_libevdev_uinput_destroy(libevdev_uinput *raw_uinp
   destroy_real_libevdev_uinput(raw_uinput_handle);
 }
 
+extern "C" const char *lvh_linux_test_libevdev_uinput_get_syspath(libevdev_uinput *device) {
+  if (lvh::detail::test::active_test_syscalls() != nullptr && lvh::detail::test::active_test_syscalls()->override_libevdev) {
+    return nullptr;
+  }
+  return ::libevdev_uinput_get_syspath(device);
+}
+
   #define access lvh_linux_test_access
   #define ioctl lvh_linux_test_ioctl
   #define open lvh_linux_test_open
@@ -585,6 +592,7 @@ extern "C" void lvh_linux_test_libevdev_uinput_destroy(libevdev_uinput *raw_uinp
   #define libevdev_set_name lvh_linux_test_libevdev_set_name
   #define libevdev_uinput_create_from_device lvh_linux_test_libevdev_uinput_create_from_device
   #define libevdev_uinput_destroy lvh_linux_test_libevdev_uinput_destroy
+  #define libevdev_uinput_get_syspath lvh_linux_test_libevdev_uinput_get_syspath
 
   #if defined(LIBVIRTUALHID_HAVE_XTEST)
     #if defined(DefaultScreen)
@@ -637,6 +645,7 @@ extern "C" void lvh_linux_test_libevdev_uinput_destroy(libevdev_uinput *raw_uinp
   #undef ioctl
   #undef access
   #undef libevdev_uinput_destroy
+  #undef libevdev_uinput_get_syspath
   #undef libevdev_uinput_create_from_device
   #undef libevdev_set_name
   #undef libevdev_set_id_version
@@ -1201,6 +1210,10 @@ namespace lvh::detail::test {
 
   std::vector<DeviceNode> linux_discover_nodes_by_name(const std::string &name) {
     return discover_input_nodes_by_name(name);
+  }
+
+  std::vector<DeviceNode> linux_discover_owned_uinput_nodes(const std::string &syspath) {
+    return discover_owned_uinput_nodes(syspath);
   }
 
   std::vector<DeviceNode> linux_discover_nodes_by_name(

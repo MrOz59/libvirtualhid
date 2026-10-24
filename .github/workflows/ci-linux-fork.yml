@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - feat/hermes-isolated-device-discovery
   pull_request:
   workflow_dispatch:
 
@@ -82,6 +83,20 @@ jobs:
       - name: Compile library, examples, and tests
         shell: bash
         run: cmake --build cmake-build-ci --parallel 2
+
+      - name: Compile without the process-global XTest fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B cmake-build-no-xtest -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_EXAMPLES=ON \
+            -DBUILD_TESTS=OFF \
+            -DLIBVIRTUALHID_BUILD_TOOLS=OFF \
+            -DLIBVIRTUALHID_ENABLE_XTEST=OFF \
+            -DLIBVIRTUALHID_WARNINGS_AS_ERRORS=ON
+          cmake --build cmake-build-no-xtest --parallel 2
 
       - name: Enable kernel virtual input devices and udev permissions
         shell: bash

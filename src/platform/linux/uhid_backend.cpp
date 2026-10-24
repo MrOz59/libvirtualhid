@@ -500,6 +500,16 @@ namespace lvh::detail {
       nodes.push_back({.kind = kind, .path = path.string()});
     }
 
+    /** @brief Accept only the numbered node names created by the kernel. */
+    bool numbered_node(std::string_view name, std::string_view prefix) {
+      if (!name.starts_with(prefix) || name.size() == prefix.size()) {
+        return false;
+      }
+      return std::ranges::all_of(name.substr(prefix.size()), [](char character) {
+        return character >= '0' && character <= '9';
+      });
+    }
+
 #if defined(__linux__)
     void append_node_if_missing(std::vector<DeviceNode> &nodes, DeviceNodeKind kind, const std::filesystem::path &path) {
       const auto path_string = path.string();
@@ -565,6 +575,12 @@ namespace lvh::detail {
       if (require_physical_id && (physical_id.empty() || !actual_physical_id || *actual_physical_id != physical_id)) {
         return false;
       }
+      // A seat identifies a session, not one controller within it. When a
+      // controller has a unique identity, missing HID_UNIQ must not broaden
+      // discovery to the other controllers on that same seat.
+      if (require_physical_id && !unique_id.empty() && (!actual_unique_id || *actual_unique_id != unique_id)) {
+        return false;
+      }
 
       auto matched_stable_metadata = false;
       if (!physical_id.empty() && actual_physical_id.has_value()) {
@@ -601,6 +617,9 @@ namespace lvh::detail {
       }
 
       for (std::filesystem::directory_iterator it {hidraw_root, error}, end; !error && it != end; it.increment(error)) {
+        if (!numbered_node(it->path().filename().string(), "hidraw")) {
+          continue;
+        }
         if (!hidraw_metadata_matches(it->path() / "device" / "uevent", name, physical_id, unique_id, require_physical_id)) {
           continue;
         }
@@ -670,7 +689,7 @@ namespace lvh::detail {
       return nodes;
     }
 
-    std::vector<DeviceNode> discover_input_nodes_by_name(
+    [[maybe_unused]] std::vector<DeviceNode> discover_input_nodes_by_name(
       const std::string &name,
       std::string_view linux_phys = {}
     ) {
@@ -722,18 +741,16 @@ namespace lvh::detail {
       const std::filesystem::path &input_root = "/sys/class/input",
       const std::filesystem::path &hidraw_root = "/sys/class/hidraw"
     ) {
-      auto nodes = discover_input_nodes_by_name(
-        name,
-        input_root,
-        hidraw_root,
-        require_physical_id ? physical_id : std::string_view {}
-      );
+      // Do not seed an isolated result with name/phys matches: those matches
+      // omit HID_UNIQ and could already contain a different controller.
+      auto nodes = require_physical_id ? std::vector<DeviceNode> {} :
+                                         discover_input_nodes_by_name(name, input_root, hidraw_root);
       if (require_physical_id && !physical_id.empty()) {
         std::error_code error;
         for (std::filesystem::directory_iterator it {input_root, error}, end; !error && it != end; it.increment(error)) {
           const auto filename = it->path().filename().string();
-          const auto is_event = filename.starts_with("event");
-          if (!is_event && !filename.starts_with("js")) {
+          const auto is_event = numbered_node(filename, "event");
+          if (!is_event && !numbered_node(filename, "js")) {
             continue;
           }
           if (!input_hid_parent_matches(it->path(), physical_id, unique_id)) {
@@ -755,6 +772,29 @@ namespace lvh::detail {
              require_physical_id
            )) {
         append_node_if_missing(nodes, node.kind, node.path);
+      }
+      return nodes;
+    }
+
+    /**
+     * @brief Discover nodes only below the input device owned by a uinput handle.
+     * @param syspath Exact input directory returned by libevdev for that handle.
+     * @return Its event and joystick nodes; never same-name peers on the seat.
+     */
+    std::vector<DeviceNode> discover_owned_uinput_nodes(const std::filesystem::path &syspath) {
+      std::vector<DeviceNode> nodes;
+      std::error_code error;
+      if (syspath.empty() || !std::filesystem::is_directory(syspath, error)) {
+        return nodes;
+      }
+      for (std::filesystem::directory_iterator it {syspath, error}, end; !error && it != end; it.increment(error)) {
+        const auto filename = it->path().filename().string();
+        const bool event = numbered_node(filename, "event");
+        if (!event && !numbered_node(filename, "js")) {
+          continue;
+        }
+        append_node(nodes, event ? DeviceNodeKind::input_event : DeviceNodeKind::joystick, std::filesystem::path {"/dev/input"} / filename);
+        append_node(nodes, DeviceNodeKind::sysfs, it->path());
       }
       return nodes;
     }
@@ -1282,7 +1322,7 @@ namespace lvh::detail {
       libevdev_uinput *uinput_device_ = nullptr;
       std::atomic_bool open_ = true;
       std::atomic_bool write_failed_ = false;
-      std::mutex write_mutex_;
+      mutable std::mutex write_mutex_;
       std::string linux_phys_;
     };
 
@@ -1809,14 +1849,22 @@ namespace lvh::detail {
     }
 
     std::vector<DeviceNode> UinputDevice::uinput_device_nodes(const std::string &device_name) const {
+      std::lock_guard lock {write_mutex_};
+      if (!open_ || uinput_device_ == nullptr) {
+        return {};
+      }
 #if defined(__FreeBSD__)
       if (uinput_device_ != nullptr) {
         if (const auto *devnode = libevdev_uinput_get_devnode(uinput_device_); devnode != nullptr) {
           return {{.kind = DeviceNodeKind::input_event, .path = devnode}};
         }
       }
-#endif
       return discover_input_nodes_by_name(device_name, linux_phys_);
+#else
+      static_cast<void>(device_name);
+      const auto *syspath = libevdev_uinput_get_syspath(uinput_device_);
+      return syspath ? discover_owned_uinput_nodes(syspath) : std::vector<DeviceNode> {};
+#endif
     }
 
     /**
@@ -3618,7 +3666,10 @@ namespace lvh::detail {
       }
 
       std::vector<DeviceNode> device_nodes() const override {
-        return discover_uhid_gamepad_nodes(device_name_, physical_id_, unique_id_, !profile_.linux_phys.empty());
+        if (!open_) {
+          return {};
+        }
+        return discover_uhid_gamepad_nodes(device_name_, physical_id_, unique_id_, true);
       }
 
       /**
@@ -4199,7 +4250,7 @@ namespace lvh::detail {
 #endif
       }
 
-      BackendMouseCreationResult create_xtest_mouse(const CreateMouseOptions &options) {
+      BackendMouseCreationResult create_xtest_mouse([[maybe_unused]] const CreateMouseOptions &options) {
 #if defined(LIBVIRTUALHID_HAVE_XTEST)
         auto mouse = std::make_unique<XTestMouse>();
         if (const auto status = mouse->create(options); !status.ok()) {

@@ -23,6 +23,15 @@ feature support still depends on the physical controller, connection, client,
 and game. See the [end-user compatibility matrix](end-user-gamepad-guide.md#compatibility-matrix)
 for observed streaming behavior.
 
+On Linux, `device_nodes()` identifies the nodes owned by one handle: uinput
+uses its exact sysfs input directory, and UHID uses the HID parent's physical
+and unique identities. A seat tag alone is insufficient when several identical
+controllers share the same session. Missing metadata returns no match; retry
+discovery after the kernel finishes creating children. Closed handles return
+no nodes. Treat returned paths as snapshots, not authorization: a privileged
+broker must open and verify each current character device and its sysfs
+identity before granting access, and revoke that access when the session ends.
+
 Route `RuntimeOptions::log_callback` into the host logger for lifecycle,
 failure, and debug-level input coordinate diagnostics. When streaming one
 monitor from a multi-monitor desktop, supply the full desktop bounds and the
